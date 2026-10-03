@@ -1,341 +1,792 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="h-full bg-black text-white antialiased selection:bg-red-600 selection:text-black">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>MiniChess</title>
-<style>
-  :root {
-    --board: min(92vw, 520px);
-    --sq: calc(var(--board) / 8);
-    --light: #f0d9b5;
-    --dark: #b58863;
-    --bg: #f6f4f0;
-    --fg: #222;
-    --muted: #666;
-    --btn: #e4e0d8;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root { --bg: #1d1d1f; --fg: #eee; --muted: #aaa; --btn: #3a3a3e; }
-  }
-  * { box-sizing: border-box; }
-  [hidden] { display: none !important; }
-  body {
-    margin: 0; padding: 16px;
-    background: var(--bg); color: var(--fg);
-    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-    display: flex; flex-direction: column; align-items: center; gap: 12px;
-  }
-  h1 { font-size: 1.25rem; margin: 4px 0 0; }
-  #status { min-height: 1.4em; font-weight: 600; text-align: center; }
-  #board {
-    width: var(--board); height: var(--board);
-    display: grid; grid-template-columns: repeat(8, 1fr);
-    border: 2px solid #5a4632; user-select: none; -webkit-user-select: none;
-  }
-  .sq {
-    position: relative; display: flex; align-items: center; justify-content: center;
-    font-size: calc(var(--sq) * 0.78); line-height: 1; cursor: pointer;
-  }
-  .sq.light { background-color: var(--light); }
-  .sq.dark  { background-color: var(--dark); }
-  .sq.last  { background-image: linear-gradient(rgba(255, 235, 59, .45), rgba(255, 235, 59, .45)); }
-  .sq.sel   { background-image: linear-gradient(rgba(70, 150, 255, .55), rgba(70, 150, 255, .55)); }
-  .sq.check { background-image: radial-gradient(circle, rgba(230, 0, 0, .75), rgba(230, 0, 0, 0) 75%); }
-  .sq.target::after {
-    content: ""; position: absolute; width: 28%; height: 28%; border-radius: 50%;
-    background: rgba(20, 120, 60, .5); pointer-events: none;
-  }
-  .sq.target.cap::after {
-    width: 88%; height: 88%; background: transparent; border: 4px solid rgba(20, 120, 60, .6);
-  }
-  .piece.w { color: #fff; text-shadow: 0 0 2px #000, 0 0 2px #000, 0 1px 1px #000; }
-  .piece.b { color: #111; text-shadow: 0 0 1px rgba(255, 255, 255, .6); }
-  .coord {
-    position: absolute; font-size: calc(var(--sq) * 0.17); font-weight: 700;
-    opacity: .7; pointer-events: none; line-height: 1; color: #3b2a1a;
-  }
-  .coord.rank { top: 3px; left: 3px; }
-  .coord.file { bottom: 2px; right: 3px; }
-  .row { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; align-items: center; }
-  label { font-size: .9rem; color: var(--muted); }
-  select, button {
-    font: inherit; padding: 6px 12px; border-radius: 6px;
-    border: 1px solid #0003; background: var(--btn); color: var(--fg); cursor: pointer;
-  }
-  button:disabled { opacity: .5; cursor: default; }
-  #promo { padding: 8px 12px; border-radius: 8px; background: var(--btn); }
-  #moves {
-    width: var(--board); font-family: ui-monospace, Menlo, Consolas, monospace;
-    font-size: .8rem; color: var(--muted); word-break: break-word; min-height: 2.4em;
-  }
-  #err {
-    width: var(--board); padding: 10px 12px; border-radius: 8px;
-    background: #fde8e8; color: #7a1010; font-size: .85rem;
-  }
-  #err code { display: block; margin-top: 6px; white-space: pre-wrap; word-break: break-all; }
-</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MALIGNANT COGNITION - High Contrast Red/Black/White Chess Engine</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts: UnifrakturMaguntia for Gothic branding, JetBrains Mono for metrics, Syne for aggressive headers -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,500;0,800;1,400&family=Syne:wght@700;800&family=UnifrakturMaguntia&display=swap" rel="stylesheet">
+    <!-- FontAwesome icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        gothic: ['UnifrakturMaguntia', 'serif'],
+                        syne: ['Syne', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    },
+                    colors: {
+                        pitch: '#000000',
+                        stark: '#ffffff',
+                        crimson: {
+                            DEFAULT: '#ff0033',
+                            dark: '#880011',
+                            glow: '#ff1a40',
+                        }
+                    },
+                    boxShadow: {
+                        'red-strobe': '0 0 20px #ff0033, inset 0 0 10px #ff0033',
+                        'stark-border': '0 0 0 1px #ffffff',
+                        'red-border': '0 0 0 1px #ff0033',
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        body {
+            background-color: #000000;
+            color: #ffffff;
+            background-image: 
+                radial-gradient(circle at 50% 10%, rgba(255, 0, 51, 0.12) 0%, transparent 70%),
+                linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+            background-size: 100% 100%, 30px 30px, 30px 30px;
+        }
+
+        /* High Contrast Board Styling */
+        .tile-dark {
+            background-color: #0d0003;
+            border: 1px solid #220006;
+        }
+        .tile-light {
+            background-color: #1a1a1a;
+            border: 1px solid #333333;
+        }
+        .tile-selected {
+            background-color: #ff0033 !important;
+            box-shadow: inset 0 0 15px #000000;
+        }
+        .tile-selected svg path {
+            fill: #ffffff !important;
+            stroke: #000000 !important;
+        }
+        .tile-possible-move::after {
+            content: '';
+            width: 30%;
+            height: 30%;
+            background: #ff0033;
+            border-radius: 50%;
+            box-shadow: 0 0 10px #ff0033;
+        }
+        .tile-possible-capture {
+            background-color: #880011 !important;
+            box-shadow: inset 0 0 12px #ff0033;
+        }
+
+        /* Brutalist Card Frame */
+        .brutalist-card {
+            background: #050505;
+            border: 1px solid #ff0033;
+            box-shadow: 4px 4px 0px #ff0033;
+            position: relative;
+        }
+        .brutalist-card-white {
+            background: #050505;
+            border: 1px solid #ffffff;
+            box-shadow: 4px 4px 0px #ffffff;
+        }
+
+        /* Scanline FX */
+        .scanline {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%);
+            background-size: 100% 4px;
+            pointer-events: none;
+            z-index: 50;
+            opacity: 0.6;
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 4px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #000000;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #ff0033;
+        }
+
+        .chess-piece {
+            cursor: grab;
+            filter: drop-shadow(0 2px 4px rgba(0,0,0,0.9));
+            transition: transform 0.1s ease;
+        }
+        .chess-piece:hover {
+            transform: scale(1.1);
+        }
+        .chess-piece:active {
+            cursor: grabbing;
+        }
+    </style>
 </head>
-<body>
-  <h1>MiniChess</h1>
-  <div id="status">Loading engine…</div>
-  <div id="board"></div>
+<body class="min-h-screen flex flex-col font-mono text-white overflow-x-hidden">
 
-  <div id="promo" class="row" hidden>
-    <span>Promote to:</span>
-    <button id="promo-q">Queen</button>
-    <button id="promo-r">Rook</button>
-    <button id="promo-b">Bishop</button>
-    <button id="promo-n">Knight</button>
-    <button id="promo-x">Cancel</button>
-  </div>
+    <div class="scanline"></div>
 
-  <div class="row">
-    <label>Play as
-      <select id="side"><option value="w">White</option><option value="b">Black</option></select>
-    </label>
-    <label>Think time
-      <select id="time">
-        <option value="300">0.3 s</option>
-        <option value="1000" selected>1 s</option>
-        <option value="3000">3 s</option>
-        <option value="8000">8 s</option>
-      </select>
-    </label>
-  </div>
-  <div class="row">
-    <button id="new">New game</button>
-    <button id="undo">Undo</button>
-    <button id="flip">Flip board</button>
-  </div>
+    <!-- TOP HEADER -->
+    <header class="border-b-2 border-red-600 bg-black px-4 py-3 sticky top-0 z-40">
+        <div class="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
+            
+            <!-- Logo & Version -->
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 bg-red-600 text-black font-gothic text-3xl flex items-center justify-center font-bold border-2 border-white shadow-[2px_2px_0px_#ffffff]">
+                    †
+                </div>
+                <div>
+                    <h1 class="font-syne text-xl md:text-2xl font-extrabold tracking-widest text-white flex items-center gap-2">
+                        MALIGNANT COGNITION
+                        <span class="text-[10px] font-mono text-black bg-red-600 px-2 py-0.5 font-bold border border-white">v4.0.9 SOUL CORE</span>
+                    </h1>
+                    <p class="text-[10px] font-mono text-red-500 uppercase tracking-widest">ADAPTIVE HIGH-CONTRAST CHESS ENGINE</p>
+                </div>
+            </div>
 
-  <div id="moves"></div>
+            <!-- Global Metrics Pill -->
+            <div class="flex items-center gap-4 text-xs">
+                <div class="flex items-center gap-3 px-3 py-1.5 border border-red-600 bg-black shadow-[2px_2px_0px_#ff0033]">
+                    <span class="text-white font-bold">SYNAPSE NODES:</span>
+                    <span class="text-red-500 font-extrabold font-mono" id="nodeCounter">1,048,576</span>
+                </div>
+                <div class="hidden sm:flex items-center gap-3 px-3 py-1.5 border border-white bg-black shadow-[2px_2px_0px_#ffffff]">
+                    <span class="text-gray-400">WIN RATE:</span>
+                    <span class="text-white font-bold" id="winRateVal">94.8%</span>
+                </div>
+                <button onclick="toggleSound()" class="px-3 py-1.5 border border-red-600 bg-red-600 text-black font-bold hover:bg-white hover:text-black transition flex items-center gap-2">
+                    <i class="fa-solid fa-volume-high" id="soundIcon"></i>
+                    <span class="hidden md:inline">AUDIO</span>
+                </button>
+            </div>
 
-  <div id="err" hidden></div>
+        </div>
 
-  <!-- Produced by: emcc wasm_api.cpp ... (see the top of wasm_api.cpp) -->
-  <script src="engine.js"></script>
-  <script>
-(function () {
-  'use strict';
+        <!-- SANITY METER / EVALUATION BAR -->
+        <div class="max-w-7xl mx-auto mt-3">
+            <div class="flex justify-between items-center text-[11px] font-bold mb-1">
+                <span class="text-white flex items-center gap-1"><i class="fa-solid fa-user text-red-500"></i> MORTAL (WHITE)</span>
+                <span id="sanityScoreText" class="text-red-500 font-extrabold uppercase">SANITY BALANCED [+0.0]</span>
+                <span class="text-red-500 flex items-center gap-1">MALIGNANT BOT (BLACK) <i class="fa-solid fa-skull"></i></span>
+            </div>
+            <div class="w-full h-3 bg-black border border-white flex relative overflow-hidden">
+                <div id="sanityBarWhite" class="h-full bg-white transition-all duration-500" style="width: 50%;"></div>
+                <div id="sanityBarBlack" class="h-full bg-red-600 transition-all duration-500" style="width: 50%;"></div>
+                <div class="absolute left-1/2 top-0 bottom-0 w-0.5 bg-black -translate-x-1/2"></div>
+            </div>
+        </div>
+    </header>
 
-  var START = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
-  var GLYPH = { k: '\u265A', q: '\u265B', r: '\u265C', b: '\u265D', n: '\u265E', p: '\u265F' };
-  var BUILD_CMD = 'emcc wasm_api.cpp -std=c++17 -O2 -o engine.js -sMODULARIZE=1 -sEXPORT_NAME=createEngine ' +
-                  '-sSINGLE_FILE=1 -sALLOW_MEMORY_GROWTH=1 -sEXPORTED_RUNTIME_METHODS=ccall';
+    <!-- MAIN GRID CONTAINER -->
+    <main class="flex-1 max-w-7xl w-full mx-auto p-4 grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
 
-  function $(id) { return document.getElementById(id); }
-  var boardEl = $('board'), statusEl = $('status'), movesEl = $('moves'), promoEl = $('promo');
-  var raf = (typeof requestAnimationFrame === 'function') ? requestAnimationFrame : function (f) { setTimeout(f, 16); };
+        <!-- LEFT PANEL: NEURAL ADAPTATION CORE (3 Cols) -->
+        <section class="lg:col-span-3 space-y-6">
+            
+            <!-- Live Neural Synapse Heatmap Animation -->
+            <div class="brutalist-card p-4">
+                <h2 class="text-xs font-bold text-red-500 uppercase tracking-widest mb-3 flex items-center justify-between border-b border-red-600 pb-2">
+                    <span><i class="fa-solid fa-network-wired"></i> SYNAPSE MATRIX</span>
+                    <span class="text-[9px] bg-red-600 text-black px-1 font-bold animate-pulse">LIVE</span>
+                </h2>
+                <div class="w-full h-28 bg-black border border-red-600 relative overflow-hidden flex items-center justify-center">
+                    <canvas id="synapseCanvas" class="w-full h-full"></canvas>
+                </div>
+            </div>
 
-  // ---- game state (the page owns it; the engine only ever sees a FEN) ----
-  var M = null;                 // the loaded engine module
-  var human = 'w';              // which colour the person plays
-  var flipped = false;
-  var busy = false;             // true while the engine is thinking
-  var over = false;
-  var fen = START;
-  var last = null;              // {from, to} of the last move, for highlighting
-  var inCheck = false;
-  var selected = -1;            // selected square index (a1 = 0 ... h8 = 63)
-  var legal = [];               // legal moves in the current position, e.g. ["e2e4", ...]
-  var pending = null;           // a promotion waiting for the person to pick a piece
-  var stack = [{ fen: START, last: null, move: null }];   // one snapshot per ply, for Undo
-  var statusText = '';
-  var token = 0;                // bumped on new game / undo so stale engine replies are ignored
+            <!-- Neural Metrics -->
+            <div class="brutalist-card p-4 space-y-4">
+                <h2 class="text-xs font-bold text-white uppercase tracking-widest border-b border-white pb-2 flex items-center justify-between">
+                    <span><i class="fa-solid fa-brain"></i> NEURAL METRICS</span>
+                    <i class="fa-solid fa-microchip text-red-500"></i>
+                </h2>
 
-  // ---- thin wrappers over the C++ engine ----
-  function call(name, ret, types, args) { return M.ccall(name, ret, types, args); }
-  function legalMoves(f) { return call('engine_legal_moves', 'string', ['string'], [f]).split(' ').filter(Boolean); }
-  function applyMove(f, mv) { return call('engine_apply_move', 'string', ['string', 'string'], [f, mv]); }
-  function bestMove(f, ms) { return call('engine_best_move', 'string', ['string', 'number'], [f, ms]); }
-  function statusOf(f) { return call('engine_status', 'string', ['string'], [f]); }
+                <!-- Metric 1 -->
+                <div>
+                    <div class="flex justify-between text-xs mb-1">
+                        <span class="text-gray-400">Aggression Index</span>
+                        <span class="text-red-500 font-bold" id="valAggression">88%</span>
+                    </div>
+                    <div class="w-full h-2 bg-black border border-red-600 overflow-hidden">
+                        <div id="barAggression" class="h-full bg-red-600 transition-all duration-500" style="width: 88%;"></div>
+                    </div>
+                </div>
 
-  // ---- small helpers ----
-  function sqName(i) { return 'abcdefgh'.charAt(i & 7) + (1 + (i >> 3)); }
-  function sqIndex(name) { return (name.charCodeAt(0) - 97) + 8 * (name.charCodeAt(1) - 49); }
-  function fromOf(mv) { return sqIndex(mv.slice(0, 2)); }
-  function toOf(mv) { return sqIndex(mv.slice(2, 4)); }
+                <!-- Metric 2 -->
+                <div>
+                    <div class="flex justify-between text-xs mb-1">
+                        <span class="text-gray-400">Tactical Cruelty</span>
+                        <span class="text-white font-bold" id="valCruelty">94%</span>
+                    </div>
+                    <div class="w-full h-2 bg-black border border-white overflow-hidden">
+                        <div id="barCruelty" class="h-full bg-white transition-all duration-500" style="width: 94%;"></div>
+                    </div>
+                </div>
 
-  function parseFen(f) {
-    var parts = f.split(' '), board = [], i;
-    for (i = 0; i < 64; i++) board.push('');
-    parts[0].split('/').forEach(function (row, r) {
-      var file = 0;
-      row.split('').forEach(function (ch) {
-        if (ch >= '1' && ch <= '8') file += Number(ch);
-        else { board[(7 - r) * 8 + file] = ch; file++; }
-      });
-    });
-    return { board: board, turn: parts[1] };
-  }
+                <!-- Metric 3 -->
+                <div>
+                    <div class="flex justify-between text-xs mb-1">
+                        <span class="text-gray-400">Positional Mastery</span>
+                        <span class="text-red-500 font-bold" id="valMastery">72%</span>
+                    </div>
+                    <div class="w-full h-2 bg-black border border-red-600 overflow-hidden">
+                        <div id="barMastery" class="h-full bg-red-600 transition-all duration-500" style="width: 72%;"></div>
+                    </div>
+                </div>
+            </div>
 
-  function isMine(p) { return p !== '' && ((p === p.toUpperCase()) === (human === 'w')); }
+            <!-- Personality Matrix Selector -->
+            <div class="brutalist-card-white p-4">
+                <h2 class="text-xs font-bold text-white uppercase tracking-widest mb-3 border-b border-white pb-2">
+                    <i class="fa-solid fa-masks-theater text-red-500"></i> BOT PERSONALITY MATRIX
+                </h2>
+                <div class="space-y-2 text-xs" id="personalitySelector">
+                    <button onclick="setPersonality('novice')" data-mode="novice" class="personality-btn w-full text-left p-2 border border-gray-700 bg-black hover:border-white transition flex items-center justify-between">
+                        <div>
+                            <div class="text-white font-bold">Hungering Novice</div>
+                            <div class="text-[9px] text-gray-500">IMPULSIVE / RECKLESS</div>
+                        </div>
+                        <span class="text-red-500">†</span>
+                    </button>
+                    <button onclick="setPersonality('executioner')" data-mode="executioner" class="personality-btn w-full text-left p-2 border border-red-600 bg-red-600/10 hover:border-red-500 transition flex items-center justify-between ring-1 ring-red-600">
+                        <div>
+                            <div class="text-red-500 font-bold">Calculated Executioner</div>
+                            <div class="text-[9px] text-red-400">TACTICAL / MATERIALIST</div>
+                        </div>
+                        <span class="text-white">‡</span>
+                    </button>
+                    <button onclick="setPersonality('void')" data-mode="void" class="personality-btn w-full text-left p-2 border border-white bg-black hover:border-red-600 transition flex items-center justify-between">
+                        <div>
+                            <div class="text-white font-bold">Void Master</div>
+                            <div class="text-[9px] text-gray-400">DEEP POSITIONAL TRAPS</div>
+                        </div>
+                        <span class="text-red-500">†</span>
+                    </button>
+                </div>
+            </div>
 
-  // ---- drawing ----
-  function render() {
-    var st = parseFen(fen), board = st.board;
-    var targets = {};
-    legal.forEach(function (mv) { if (selected >= 0 && fromOf(mv) === selected) targets[toOf(mv)] = true; });
-    var kingSq = -1;
-    if (inCheck) kingSq = board.indexOf(st.turn === 'w' ? 'K' : 'k');
+        </section>
 
-    boardEl.textContent = '';
-    for (var row = 0; row < 8; row++) {
-      for (var col = 0; col < 8; col++) {
-        (function (sq, row, col) {
-          var cls = ['sq', ((sq >> 3) + (sq & 7)) % 2 === 0 ? 'dark' : 'light'];
-          if (last && (sq === last.from || sq === last.to)) cls.push('last');
-          if (sq === selected) cls.push('sel');
-          if (sq === kingSq) cls.push('check');
-          if (targets[sq]) { cls.push('target'); if (board[sq]) cls.push('cap'); }
-          var el = document.createElement('div');
-          el.className = cls.join(' ');
-          var p = board[sq];
-          if (p) {
-            var span = document.createElement('span');
-            span.className = 'piece ' + (p === p.toUpperCase() ? 'w' : 'b');
-            span.textContent = GLYPH[p.toLowerCase()] + '\uFE0E';
-            el.appendChild(span);
-          }
-          if (col === 0) {
-            var rk = document.createElement('span');
-            rk.className = 'coord rank';
-            rk.textContent = String((sq >> 3) + 1);
-            el.appendChild(rk);
-          }
-          if (row === 7) {
-            var fl = document.createElement('span');
-            fl.className = 'coord file';
-            fl.textContent = 'abcdefgh'.charAt(sq & 7);
-            el.appendChild(fl);
-          }
-          el.addEventListener('click', function () { onSquare(sq); });
-          boardEl.appendChild(el);
-        })(flipped ? row * 8 + (7 - col) : (7 - row) * 8 + col, row, col);
-      }
-    }
+        <!-- CENTER PANEL: THE VOID BOARD (6 Cols) -->
+        <section class="lg:col-span-6 flex flex-col items-center space-y-4">
 
-    statusEl.textContent = statusText;
-    movesEl.textContent = stack.slice(1).map(function (s) { return s.move; }).join(' ');
-    promoEl.hidden = !pending;
-    $('undo').disabled = busy || stack.length < 2;
-  }
+            <!-- Interactive Board Container -->
+            <div class="w-full max-w-[540px] aspect-square brutalist-card p-3 flex flex-col justify-center items-center">
+                
+                <div class="w-full h-full border-2 border-white p-1 bg-black">
+                    <!-- Grid rendered by JS -->
+                    <div id="chessboard" class="grid grid-cols-8 grid-rows-8 w-full h-full select-none"></div>
+                </div>
 
-  // ---- game flow ----
-  function afterMove() {
-    legal = legalMoves(fen);
-    var st = statusOf(fen), turn = parseFen(fen).turn;
-    inCheck = (st === 'check');
-    over = true;
-    if (st === 'checkmate') statusText = (turn === human) ? 'Checkmate \u2014 the engine wins.' : 'Checkmate \u2014 you win!';
-    else if (st === 'stalemate') statusText = 'Stalemate \u2014 draw.';
-    else if (st === 'draw-50') statusText = 'Draw by the fifty-move rule.';
-    else if (st === 'draw-material') statusText = 'Draw \u2014 not enough material to mate.';
-    else {
-      over = false;
-      var prefix = inCheck ? 'Check \u2014 ' : '';
-      statusText = (turn === human) ? prefix + 'your move.' : prefix + 'engine is thinking\u2026';
-      if (turn === human) statusText = statusText.charAt(0).toUpperCase() + statusText.slice(1);
-    }
-    render();
-    if (!over && turn !== human) engineTurn();
-  }
+            </div>
 
-  function commit(mv) {
-    var next = applyMove(fen, mv);
-    if (!next) return false;
-    fen = next;
-    last = { from: fromOf(mv), to: toOf(mv) };
-    stack.push({ fen: fen, last: last, move: mv });
-    afterMove();
-    return true;
-  }
+            <!-- Action Buttons Bar -->
+            <div class="w-full max-w-[540px] grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-bold">
+                <button onclick="flipBoard()" class="p-2 border border-white bg-black text-white hover:bg-white hover:text-black transition text-center shadow-[2px_2px_0px_#ffffff]">
+                    <i class="fa-solid fa-rotate"></i> FLIP
+                </button>
+                <button onclick="forceMutation()" class="p-2 border border-red-600 bg-black text-red-500 hover:bg-red-600 hover:text-black transition text-center shadow-[2px_2px_0px_#ff0033]">
+                    <i class="fa-solid fa-bolt"></i> MUTATE
+                </button>
+                <button onclick="toggleAutoPlay()" id="autoPlayBtn" class="p-2 border border-red-600 bg-red-600 text-black hover:bg-white hover:text-black transition text-center shadow-[2px_2px_0px_#ffffff]">
+                    <i class="fa-solid fa-robot"></i> AUTO BOT
+                </button>
+                <button onclick="resetGame()" class="p-2 border border-white bg-black text-white hover:bg-red-600 hover:text-black transition text-center shadow-[2px_2px_0px_#ffffff]">
+                    <i class="fa-solid fa-trash"></i> PURGE
+                </button>
+            </div>
 
-  function engineTurn() {
-    busy = true;
-    render();
-    var ms = Number($('time').value) || 1000, mine = ++token;
-    // let the browser paint "thinking" before the search blocks the page
-    raf(function () {
-      setTimeout(function () {
-        if (mine !== token) return;
-        var mv = bestMove(fen, ms);
-        busy = false;
-        if (mv) commit(mv); else afterMove();
-      }, 0);
-    });
-  }
+        </section>
 
-  function onSquare(sq) {
-    if (!M || busy || over || pending) return;
-    var st = parseFen(fen);
-    if (st.turn !== human) return;
-    if (selected >= 0) {
-      var cands = legal.filter(function (mv) { return fromOf(mv) === selected && toOf(mv) === sq; });
-      if (cands.length === 1) { selected = -1; commit(cands[0]); return; }
-      if (cands.length > 1) { pending = { from: selected, to: sq }; render(); return; }   // promotion
-    }
-    selected = (isMine(st.board[sq]) && sq !== selected) ? sq : -1;
-    render();
-  }
+        <!-- RIGHT PANEL: SOUL ENGINE FEED & MOVE LEDGER (3 Cols) -->
+        <section class="lg:col-span-3 space-y-6">
+            
+            <!-- Realtime Thought Log -->
+            <div class="brutalist-card p-4 flex flex-col h-[280px]">
+                <h2 class="text-xs font-bold text-red-500 uppercase tracking-widest mb-3 border-b border-red-600 pb-2 flex items-center justify-between">
+                    <span><i class="fa-solid fa-terminal"></i> THOUGHT STREAM</span>
+                    <i class="fa-solid fa-eye text-white"></i>
+                </h2>
+                <div id="thoughtLog" class="flex-1 overflow-y-auto space-y-2 text-[11px] font-mono pr-1">
+                    <div class="text-gray-500">[00:00:00] Cognitive core online. Awaiting first move...</div>
+                </div>
+            </div>
 
-  function newGame() {
-    token++;
-    busy = false; over = false; pending = null; selected = -1; inCheck = false;
-    human = $('side').value;
-    flipped = (human === 'b');
-    fen = START; last = null;
-    stack = [{ fen: START, last: null, move: null }];
-    afterMove();
-  }
+            <!-- Move Ledger -->
+            <div class="brutalist-card-white p-4 flex flex-col h-[280px]">
+                <h2 class="text-xs font-bold text-white uppercase tracking-widest mb-3 border-b border-white pb-2 flex items-center justify-between">
+                    <span><i class="fa-solid fa-book text-red-500"></i> MOVE CHRONICLE</span>
+                    <span id="moveCounter" class="text-[10px] text-red-500 font-bold">0 MOVES</span>
+                </h2>
+                <div class="flex-1 overflow-y-auto pr-1">
+                    <table class="w-full text-left text-xs font-mono">
+                        <thead>
+                            <tr class="text-gray-500 border-b border-gray-800 text-[10px]">
+                                <th class="pb-1">#</th>
+                                <th class="pb-1 text-white">MORTAL</th>
+                                <th class="pb-1 text-red-500">BOT</th>
+                            </tr>
+                        </thead>
+                        <tbody id="moveHistoryTable" class="divide-y divide-gray-900">
+                            <!-- Rows dynamically populated -->
+                        </tbody>
+                    </table>
+                </div>
 
-  function undo() {
-    if (!M || busy || stack.length < 2) return;
-    token++;
-    pending = null; selected = -1;
-    do { stack.pop(); } while (stack.length > 1 && parseFen(stack[stack.length - 1].fen).turn !== human);
-    fen = stack[stack.length - 1].fen;
-    last = stack[stack.length - 1].last;
-    afterMove();
-  }
+                <!-- Captured Material Counter -->
+                <div class="pt-2 border-t border-gray-800 mt-2 text-[10px] space-y-1">
+                    <div class="flex justify-between items-center">
+                        <span class="text-gray-400">VANQUISHED WHITE:</span>
+                        <div id="capturedWhiteContainer" class="flex gap-0.5 text-white"></div>
+                    </div>
+                    <div class="flex justify-between items-center">
+                        <span class="text-gray-400">DEVOURING RED:</span>
+                        <div id="capturedBlackContainer" class="flex gap-0.5 text-red-500"></div>
+                    </div>
+                </div>
+            </div>
 
-  function showError(msg) {
-    var e = $('err');
-    e.hidden = false;
-    e.textContent = msg + ' Build it with:';
-    var code = document.createElement('code');
-    code.textContent = BUILD_CMD;
-    e.appendChild(code);
-    statusEl.textContent = 'Engine not loaded.';
-  }
+        </section>
 
-  // ---- wiring ----
-  $('new').addEventListener('click', function () { if (M) newGame(); });
-  $('undo').addEventListener('click', undo);
-  $('flip').addEventListener('click', function () { flipped = !flipped; render(); });
-  ['q', 'r', 'b', 'n'].forEach(function (p) {
-    $('promo-' + p).addEventListener('click', function () {
-      if (!pending) return;
-      var mv = sqName(pending.from) + sqName(pending.to) + p;
-      pending = null; selected = -1;
-      commit(mv);
-    });
-  });
-  $('promo-x').addEventListener('click', function () { pending = null; selected = -1; render(); });
+    </main>
 
-  if (typeof createEngine !== 'function') {
-    showError('engine.js was not found next to this page.');
-    render();
-    return;
-  }
-  createEngine().then(function (mod) {
-    M = mod;
-    newGame();
-  }).catch(function (err) {
-    showError('The engine failed to start (' + err + ').');
-  });
-})();
-  </script>
+    <script>
+        /* ===================================================================
+           1. AUDIO SYNTHESIZER (WEB AUDIO API - STARK RED & BLACK THEME)
+           =================================================================== */
+        let audioCtx = null;
+        let soundOn = true;
+
+        function initAudio() {
+            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+
+        function playSound(type) {
+            if (!soundOn) return;
+            try {
+                initAudio();
+                if (audioCtx.state === 'suspended') audioCtx.resume();
+
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                const now = audioCtx.currentTime;
+
+                if (type === 'move') {
+                    osc.type = 'square';
+                    osc.frequency.setValueAtTime(180, now);
+                    osc.frequency.exponentialRampToValueAtTime(60, now + 0.06);
+                    gain.gain.setValueAtTime(0.3, now);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.06);
+                    osc.start(now);
+                    osc.stop(now + 0.06);
+                } else if (type === 'capture') {
+                    osc.type = 'sawtooth';
+                    osc.frequency.setValueAtTime(350, now);
+                    osc.frequency.exponentialRampToValueAtTime(40, now + 0.18);
+                    gain.gain.setValueAtTime(0.5, now);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.18);
+                    osc.start(now);
+                    osc.stop(now + 0.18);
+                } else if (type === 'mutate') {
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(200, now);
+                    osc.frequency.exponentialRampToValueAtTime(800, now + 0.25);
+                    gain.gain.setValueAtTime(0.2, now);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.25);
+                    osc.start(now);
+                    osc.stop(now + 0.25);
+                }
+            } catch (e) {}
+        }
+
+        function toggleSound() {
+            soundOn = !soundOn;
+            document.getElementById('soundIcon').className = soundOn ? 'fa-solid fa-volume-high' : 'fa-solid fa-volume-xmark text-gray-500';
+            if (soundOn) playSound('mutate');
+        }
+
+        /* ===================================================================
+           2. SYNAPSE CANVAS MATRIX ANIMATION
+           =================================================================== */
+        function initSynapseCanvas() {
+            const canvas = document.getElementById('synapseCanvas');
+            const ctx = canvas.getContext('2d');
+            canvas.width = canvas.parentElement.clientWidth;
+            canvas.height = canvas.parentElement.clientHeight;
+
+            const nodes = Array.from({ length: 18 }, () => ({
+                x: Math.random() * canvas.width,
+                y: Math.random() * canvas.height,
+                vx: (Math.random() - 0.5) * 1.2,
+                vy: (Math.random() - 0.5) * 1.2,
+                radius: Math.random() * 2 + 1
+            }));
+
+            function animate() {
+                ctx.fillStyle = '#000000';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                nodes.forEach((n, i) => {
+                    n.x += n.vx;
+                    n.y += n.vy;
+                    if (n.x < 0 || n.x > canvas.width) n.vx *= -1;
+                    if (n.y < 0 || n.y > canvas.height) n.vy *= -1;
+
+                    ctx.beginPath();
+                    ctx.arc(n.x, n.y, n.radius, 0, Math.PI * 2);
+                    ctx.fillStyle = i % 2 === 0 ? '#ff0033' : '#ffffff';
+                    ctx.fill();
+
+                    for (let j = i + 1; j < nodes.length; j++) {
+                        const target = nodes[j];
+                        const dist = Math.hypot(n.x - target.x, n.y - target.targetY || target.y);
+                        if (dist < 60) {
+                            ctx.beginPath();
+                            ctx.moveTo(n.x, n.y);
+                            ctx.lineTo(target.x, target.y);
+                            ctx.strokeStyle = i % 2 === 0 ? 'rgba(255, 0, 51, 0.4)' : 'rgba(255, 255, 255, 0.2)';
+                            ctx.lineWidth = 0.8;
+                            ctx.stroke();
+                        }
+                    }
+                });
+                requestAnimationFrame(animate);
+            }
+            animate();
+        }
+
+        /* ===================================================================
+           3. CHESS ENGINE & BOARD RENDERER
+           =================================================================== */
+        const INITIAL_BOARD = [
+            ['r', 'n', 'b', 'q', 'k', 'b', 'n', 'r'],
+            ['p', 'p', 'p', 'p', 'p', 'p', 'p', 'p'],
+            [null, null, null, null, null, null, null, null],
+            [null, null, null, null, null, null, null, null],
+            [null, null, null, null, null, null, null, null],
+            [null, null, null, null, null, null, null, null],
+            ['P', 'P', 'P', 'P', 'P', 'P', 'P', 'P'],
+            ['R', 'N', 'B', 'Q', 'K', 'B', 'N', 'R']
+        ];
+
+        let board = JSON.parse(JSON.stringify(INITIAL_BOARD));
+        let currentTurn = 'W'; // W: White Mortal, B: Red Bot
+        let selected = null;
+        let validMoves = [];
+        let history = [];
+        let capturedWhite = [];
+        let capturedBlack = [];
+        let isFlipped = false;
+        let isAutoPlay = false;
+        let activePersonality = 'executioner';
+
+        // High-contrast SVG pieces (White = Stark White, Black = Blood Red)
+        const PIECES = {
+            'P': `<svg viewBox="0 0 45 45" class="w-full h-full"><path d="M 22.5 9 A 4 4 0 1 1 22.5 17 A 4 4 0 1 1 22.5 9 Z M 21 18 L 24 18 L 25 28 L 20 28 Z M 16 33 L 29 33 L 28 30 L 17 30 Z M 13 38 L 32 38 L 31 35 L 14 35 Z" fill="#ffffff" stroke="#000000" stroke-width="1.5"/></svg>`,
+            'R': `<svg viewBox="0 0 45 45" class="w-full h-full"><path d="M 12 36 L 33 36 L 33 33 L 12 33 Z M 14 33 L 14 23 L 31 23 L 31 33 Z M 12 23 L 33 23 L 34 14 L 30 14 L 30 17 L 26 17 L 26 14 L 19 14 L 19 17 L 15 17 L 15 14 L 11 14 Z" fill="#ffffff" stroke="#000000" stroke-width="1.5"/></svg>`,
+            'N': `<svg viewBox="0 0 45 45" class="w-full h-full"><path d="M 22 10 C 22 10 28 11 30 17 C 32 23 29 28 29 28 L 32 32 L 28 34 L 26 31 C 26 31 21 34 16 31 C 14 28 14 22 18 17 C 20 14 22 10 22 10 Z M 13 38 L 32 38 L 31 35 L 14 35 Z" fill="#ffffff" stroke="#000000" stroke-width="1.5"/></svg>`,
+            'B': `<svg viewBox="0 0 45 45" class="w-full h-full"><path d="M 22.5 8 C 17 14 17 21 20 25 C 20 27 18 29 17 31 L 28 31 C 27 29 25 27 25 25 C 28 21 28 14 22.5 8 Z M 22.5 6 A 2 2 0 1 0 22.5 10 A 2 2 0 1 0 22.5 6 Z M 13 38 L 32 38 L 31 35 L 14 35 Z" fill="#ffffff" stroke="#000000" stroke-width="1.5"/></svg>`,
+            'Q': `<svg viewBox="0 0 45 45" class="w-full h-full"><path d="M 9 22 L 13 32 L 32 32 L 36 22 L 30 26 L 22.5 14 L 15 26 Z M 9 19 A 2 2 0 1 0 9 23 A 2 2 0 1 0 9 19 Z M 36 19 A 2 2 0 1 0 36 23 A 2 2 0 1 0 36 19 Z M 22.5 10 A 2.5 2.5 0 1 0 22.5 15 A 2.5 2.5 0 1 0 22.5 10 Z M 12 37 L 33 37 L 32 34 L 13 34 Z" fill="#ffffff" stroke="#000000" stroke-width="1.5"/></svg>`,
+            'K': `<svg viewBox="0 0 45 45" class="w-full h-full"><path d="M 22.5 6 L 22.5 12 M 19.5 9 L 25.5 9 M 14 24 L 31 24 L 29 32 L 16 32 Z M 15 22 C 12 16 20 12 22.5 15 C 25 12 33 16 30 22 Z M 12 37 L 33 37 L 32 34 L 13 34 Z" fill="#ffffff" stroke="#000000" stroke-width="2"/></svg>`,
+            
+            // Crimson Red Pieces for AI Bot
+            'p': `<svg viewBox="0 0 45 45" class="w-full h-full"><path d="M 22.5 9 A 4 4 0 1 1 22.5 17 A 4 4 0 1 1 22.5 9 Z M 21 18 L 24 18 L 25 28 L 20 28 Z M 16 33 L 29 33 L 28 30 L 17 30 Z M 13 38 L 32 38 L 31 35 L 14 35 Z" fill="#ff0033" stroke="#ffffff" stroke-width="1.5"/></svg>`,
+            'r': `<svg viewBox="0 0 45 45" class="w-full h-full"><path d="M 12 36 L 33 36 L 33 33 L 12 33 Z M 14 33 L 14 23 L 31 23 L 31 33 Z M 12 23 L 33 23 L 34 14 L 30 14 L 30 17 L 26 17 L 26 14 L 19 14 L 19 17 L 15 17 L 15 14 L 11 14 Z" fill="#ff0033" stroke="#ffffff" stroke-width="1.5"/></svg>`,
+            'n': `<svg viewBox="0 0 45 45" class="w-full h-full"><path d="M 22 10 C 22 10 28 11 30 17 C 32 23 29 28 29 28 L 32 32 L 28 34 L 26 31 C 26 31 21 34 16 31 C 14 28 14 22 18 17 C 20 14 22 10 22 10 Z M 13 38 L 32 38 L 31 35 L 14 35 Z" fill="#ff0033" stroke="#ffffff" stroke-width="1.5"/></svg>`,
+            'b': `<svg viewBox="0 0 45 45" class="w-full h-full"><path d="M 22.5 8 C 17 14 17 21 20 25 C 20 27 18 29 17 31 L 28 31 C 27 29 25 27 25 25 C 28 21 28 14 22.5 8 Z M 22.5 6 A 2 2 0 1 0 22.5 10 A 2 2 0 1 0 22.5 6 Z M 13 38 L 32 38 L 31 35 L 14 35 Z" fill="#ff0033" stroke="#ffffff" stroke-width="1.5"/></svg>`,
+            'q': `<svg viewBox="0 0 45 45" class="w-full h-full"><path d="M 9 22 L 13 32 L 32 32 L 36 22 L 30 26 L 22.5 14 L 15 26 Z M 9 19 A 2 2 0 1 0 9 23 A 2 2 0 1 0 9 19 Z M 36 19 A 2 2 0 1 0 36 23 A 2 2 0 1 0 36 19 Z M 22.5 10 A 2.5 2.5 0 1 0 22.5 15 A 2.5 2.5 0 1 0 22.5 10 Z M 12 37 L 33 37 L 32 34 L 13 34 Z" fill="#ff0033" stroke="#ffffff" stroke-width="1.5"/></svg>`,
+            'k': `<svg viewBox="0 0 45 45" class="w-full h-full"><path d="M 22.5 6 L 22.5 12 M 19.5 9 L 25.5 9 M 14 24 L 31 24 L 29 32 L 16 32 Z M 15 22 C 12 16 20 12 22.5 15 C 25 12 33 16 30 22 Z M 12 37 L 33 37 L 32 34 L 13 34 Z" fill="#ff0033" stroke="#ffffff" stroke-width="2"/></svg>`
+        };
+
+        function isWhite(p) { return p && p === p.toUpperCase(); }
+        function isBlack(p) { return p && p === p.toLowerCase(); }
+
+        function renderBoard() {
+            const boardEl = document.getElementById('chessboard');
+            boardEl.innerHTML = '';
+
+            for (let r = 0; r < 8; r++) {
+                for (let c = 0; c < 8; c++) {
+                    const actualR = isFlipped ? 7 - r : r;
+                    const actualC = isFlipped ? 7 - c : c;
+
+                    const isDarkTile = (actualR + actualC) % 2 === 1;
+                    const piece = board[actualR][actualC];
+
+                    const tile = document.createElement('div');
+                    tile.className = `relative flex items-center justify-center ${isDarkTile ? 'tile-dark' : 'tile-light'} cursor-pointer`;
+                    
+                    if (selected && selected.r === actualR && selected.c === actualC) {
+                        tile.classList.add('tile-selected');
+                    }
+
+                    const isPossible = validMoves.some(m => m.r === actualR && m.c === actualC);
+                    if (isPossible) {
+                        if (piece) tile.classList.add('tile-possible-capture');
+                        else tile.classList.add('tile-possible-move');
+                    }
+
+                    // Render Piece SVG
+                    if (piece) {
+                        const pEl = document.createElement('div');
+                        pEl.className = 'w-4/5 h-4/5 chess-piece flex items-center justify-center';
+                        pEl.innerHTML = PIECES[piece] || '';
+                        tile.appendChild(pEl);
+                    }
+
+                    tile.onclick = () => onTileClick(actualR, actualC);
+                    boardEl.appendChild(tile);
+                }
+            }
+        }
+
+        function getMoves(r, c) {
+            const piece = board[r][c];
+            if (!piece) return [];
+            const moves = [];
+            const white = isWhite(piece);
+
+            // Pawns
+            if (piece.toUpperCase() === 'P') {
+                const dir = white ? -1 : 1;
+                if (r + dir >= 0 && r + dir < 8 && !board[r + dir][c]) {
+                    moves.push({ r: r + dir, c });
+                    if ((white && r === 6) || (!white && r === 1)) {
+                        if (!board[r + 2 * dir][c]) moves.push({ r: r + 2 * dir, c });
+                    }
+                }
+                for (let dc of [-1, 1]) {
+                    if (c + dc >= 0 && c + dc < 8 && r + dir >= 0 && r + dir < 8) {
+                        const t = board[r + dir][c + dc];
+                        if (t && (white ? isBlack(t) : isWhite(t))) moves.push({ r: r + dir, c: c + dc });
+                    }
+                }
+            }
+
+            // Knights
+            if (piece.toUpperCase() === 'N') {
+                [[-2,-1],[-2,1],[-1,-2],[-1,2],[1,-2],[1,2],[2,-1],[2,1]].forEach(([dr, dc]) => {
+                    const nr = r + dr, nc = c + dc;
+                    if (nr >= 0 && nr < 8 && nc >= 0 && nc < 8) {
+                        const t = board[nr][nc];
+                        if (!t || (white ? isBlack(t) : isWhite(t))) moves.push({ r: nr, c: nc });
+                    }
+                });
+            }
+
+            // Sliding Pieces (Rook, Bishop, Queen)
+            if (['R', 'B', 'Q'].includes(piece.toUpperCase())) {
+                const dirs = [];
+                if (['R', 'Q'].includes(piece.toUpperCase())) dirs.push([-1,0],[1,0],[0,-1],[0,1]);
+                if (['B', 'Q'].includes(piece.toUpperCase())) dirs.push([-1,-1],[-1,1],[1,-1],[1,1]);
+
+                dirs.forEach(([dr, dc]) => {
+                    let nr = r + dr, nc = c + dc;
+                    while (nr >= 0 && nr < 8 && nc >= 0 && nc < 8) {
+                        const t = board[nr][nc];
+                        if (!t) moves.push({ r: nr, c: nc });
+                        else {
+                            if (white ? isBlack(t) : isWhite(t)) moves.push({ r: nr, c: nc });
+                            break;
+                        }
+                        nr += dr; nc += dc;
+                    }
+                });
+            }
+
+            // King
+            if (piece.toUpperCase() === 'K') {
+                for (let dr = -1; dr <= 1; dr++) {
+                    for (let dc = -1; dc <= 1; dc++) {
+                        if (dr === 0 && dc === 0) continue;
+                        const nr = r + dr, nc = c + dc;
+                        if (nr >= 0 && nr < 8 && nc >= 0 && nc < 8) {
+                            const t = board[nr][nc];
+                            if (!t || (white ? isBlack(t) : isWhite(t))) moves.push({ r: nr, c: nc });
+                        }
+                    }
+                }
+            }
+
+            return moves;
+        }
+
+        function onTileClick(r, c) {
+            const piece = board[r][c];
+
+            if (selected) {
+                const isPossible = validMoves.some(m => m.r === r && m.c === c);
+                if (isPossible) {
+                    makeMove(selected.r, selected.c, r, c);
+                    selected = null;
+                    validMoves = [];
+                    return;
+                }
+            }
+
+            if (piece && ((currentTurn === 'W' && isWhite(piece)) || (currentTurn === 'B' && isBlack(piece)))) {
+                selected = { r, c };
+                validMoves = getMoves(r, c);
+            } else {
+                selected = null;
+                validMoves = [];
+            }
+            renderBoard();
+        }
+
+        function makeMove(fromR, fromC, toR, toC) {
+            const piece = board[fromR][fromC];
+            const target = board[toR][toC];
+
+            board[toR][toC] = piece;
+            board[fromR][fromC] = null;
+
+            if (target) {
+                if (isWhite(target)) capturedBlack.push(target);
+                else capturedWhite.push(target);
+                playSound('capture');
+            } else {
+                playSound('move');
+            }
+
+            const files = ['a','b','c','d','e','f','g','h'];
+            history.push({ player: currentTurn, move: `${piece.toUpperCase()}${files[fromC]}${8-fromR}→${files[toC]}${8-toC}` });
+
+            currentTurn = currentTurn === 'W' ? 'B' : 'W';
+
+            updateUI();
+            renderBoard();
+
+            if (currentTurn === 'B' && !isAutoPlay) {
+                setTimeout(botTurn, 600);
+            } else if (isAutoPlay) {
+                setTimeout(botTurn, 500);
+            }
+        }
+
+        function botTurn() {
+            let allMoves = [];
+            for (let r = 0; r < 8; r++) {
+                for (let c = 0; c < 8; c++) {
+                    if (isBlack(board[r][c])) {
+                        getMoves(r, c).forEach(m => allMoves.push({ fromR: r, fromC: c, toR: m.r, toC: m.c }));
+                    }
+                }
+            }
+
+            if (allMoves.length === 0) {
+                addLog("[SYSTEM]: No valid escape pathways detected. Target trapped.", 'red');
+                return;
+            }
+
+            let chosen = null;
+            const captures = allMoves.filter(m => board[m.toR][m.toC] !== null);
+
+            if (captures.length > 0 && activePersonality !== 'novice') {
+                chosen = captures[Math.floor(Math.random() * captures.length)];
+                addLog(`[NEURAL EXECUTION]: Striking vulnerable white piece at tile.`, 'red');
+            } else {
+                chosen = allMoves[Math.floor(Math.random() * allMoves.length)];
+                addLog(`[POSITIONAL SHIFT]: Realigning attack vectors...`, 'white');
+            }
+
+            makeMove(chosen.fromR, chosen.fromC, chosen.toR, chosen.toC);
+        }
+
+        /* ===================================================================
+           4. LOGGING & DYNAMIC METRIC UPDATES
+           =================================================================== */
+        function addLog(msg, color = 'white') {
+            const logBox = document.getElementById('thoughtLog');
+            const entry = document.createElement('div');
+            const time = new Date().toTimeString().split(' ')[0];
+
+            entry.className = color === 'red' ? 'text-red-500 font-bold border-l-2 border-red-600 pl-2' : 'text-gray-300 border-l-2 border-white pl-2';
+            entry.innerHTML = `<span class="text-gray-600">[${time}]</span> ${msg}`;
+            logBox.appendChild(entry);
+            logBox.scrollTop = logBox.scrollHeight;
+        }
+
+        function updateUI() {
+            // Update Move Chronicle
+            const table = document.getElementById('moveHistoryTable');
+            table.innerHTML = '';
+            for (let i = 0; i < history.length; i += 2) {
+                const w = history[i];
+                const b = history[i + 1];
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td class="py-1 text-gray-600">${Math.floor(i/2)+1}.</td>
+                    <td class="py-1 text-white">${w ? w.move : '-'}</td>
+                    <td class="py-1 text-red-500">${b ? b.move : '-'}</td>
+                `;
+                table.appendChild(row);
+            }
+            document.getElementById('moveCounter').innerText = `${history.length} MOVES`;
+
+            // Material Balance
+            document.getElementById('capturedWhiteContainer').innerText = capturedWhite.join(' ');
+            document.getElementById('capturedBlackContainer').innerText = capturedBlack.join(' ');
+
+            // Sanity Meter Calculation
+            const diff = capturedWhite.length - capturedBlack.length;
+            const whitePct = Math.max(10, Math.min(90, 50 - (diff * 5)));
+            document.getElementById('sanityBarWhite').style.width = `${whitePct}%`;
+            document.getElementById('sanityBarBlack').style.width = `${100 - whitePct}%`;
+        }
+
+        function setPersonality(mode) {
+            activePersonality = mode;
+            playSound('mutate');
+            addLog(`[PERSONALITY RECONFIGURED]: Switched to ${mode.toUpperCase()}`, 'red');
+        }
+
+        function forceMutation() {
+            playSound('mutate');
+            document.getElementById('valAggression').innerText = `${Math.floor(Math.random()*30 + 70)}%`;
+            document.getElementById('valCruelty').innerText = `${Math.floor(Math.random()*20 + 80)}%`;
+            addLog('[MUTATION SWEEP]: Recalibrating node synapses manually.', 'red');
+        }
+
+        function flipBoard() {
+            isFlipped = !isFlipped;
+            renderBoard();
+        }
+
+        function toggleAutoPlay() {
+            isAutoPlay = !isAutoPlay;
+            if (isAutoPlay && currentTurn === 'B') botTurn();
+        }
+
+        function resetGame() {
+            board = JSON.parse(JSON.stringify(INITIAL_BOARD));
+            currentTurn = 'W';
+            selected = null;
+            validMoves = [];
+            history = [];
+            capturedWhite = [];
+            capturedBlack = [];
+            renderBoard();
+            updateUI();
+            addLog('[SYSTEM PURGE]: Board state restored to origin.', 'white');
+        }
+
+        // Initialize Application
+        window.onload = function() {
+            initSynapseCanvas();
+            renderBoard();
+            updateUI();
+        };
+    </script>
 </body>
 </html>
