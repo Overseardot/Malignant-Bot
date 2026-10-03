@@ -70,7 +70,7 @@ inline double score(const int* board, int side, double mobility = 0) {
     return s;
 }
 
-inline void update(const int* board, int side, double outcome, double mobility = 0, double rate = 0.15) {
+inline void update(const int* board, int side, double outcome, double mobility = 0, double rate = 0.01) {
     load();
     double f[8];
     features(board, side, f);
@@ -78,9 +78,19 @@ inline void update(const int* board, int side, double outcome, double mobility =
     double raw = score(board, side, mobility) / 1000.0;
     double prediction = std::tanh(raw);
     double error = outcome - prediction;
-    for (int i = 0; i < 6; ++i) weights.material[i] += rate * error * f[i];
-    weights.center += rate * error * f[6];
-    weights.mobility += rate * error * f[7];
+
+    // Keep the learned layer a bounded refinement of the hand-tuned evaluator.
+    // This prevents long self-play runs from allowing a few noisy games to
+    // overwhelm the baseline evaluation.
+    constexpr double LIMIT = 80.0;
+    auto adjust = [&](double& w, double feature) {
+        w += rate * error * feature;
+        if (w > LIMIT) w = LIMIT;
+        if (w < -LIMIT) w = -LIMIT;
+    };
+    for (int i = 0; i < 6; ++i) adjust(weights.material[i], f[i]);
+    adjust(weights.center, f[6]);
+    adjust(weights.mobility, f[7]);
 }
 
 } // namespace machine_learning
