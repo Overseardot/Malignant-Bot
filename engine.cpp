@@ -498,8 +498,10 @@ struct Searcher {
     bool havePrev = false;
     bool hasMove = false;  // false if the position has no legal move
     TranspositionTable tt;
+    Move killer[MAXPLY][2]{};
+    int history[2][64][64]{};
 
-    Searcher() : tt(32) {}
+    Searcher() : tt(16) {}
 
     long long elapsedMs() const {
         return chrono::duration_cast<chrono::milliseconds>(chrono::steady_clock::now() - t0).count();
@@ -519,6 +521,11 @@ struct Searcher {
                 s = 100000 + victim * 10 - typeOf(pos.b[m.from]);
             }
             if (m.promo) s += 90000 + m.promo;
+            if (!(m.flags & F_CAPTURE) && !m.promo) {
+                if (ply < MAXPLY && m == killer[ply][0]) s += 70000;
+                else if (ply < MAXPLY && m == killer[ply][1]) s += 60000;
+                s += history[pos.side][m.from][m.to];
+            }
             ml.score[i] = s;
         }
     }
@@ -576,6 +583,7 @@ struct Searcher {
 
         const uint64_t key = Z.hash(pos);
         const int originalAlpha = alpha;
+        const int originalBeta = beta;
         TTEntry* hit = tt.probe(key);
         if (hit && hit->depth >= depth) {
             if (hit->flag == TT_EXACT) return hit->score;
@@ -610,14 +618,24 @@ struct Searcher {
                 alpha = score;
                 bestMove = ml.m[i];
                 if (ply == 0) rootBest = ml.m[i];
-                if (alpha >= beta) break;
+                if (alpha >= beta) {
+                    if (!(ml.m[i].flags & F_CAPTURE) && !ml.m[i].promo && ply < MAXPLY) {
+                        if (!(ml.m[i] == killer[ply][0])) {
+                            killer[ply][1] = killer[ply][0];
+                            killer[ply][0] = ml.m[i];
+                        }
+                        int& h = history[pos.side][ml.m[i].from][ml.m[i].to];
+                        h = min(20000, h + depth * depth);
+                    }
+                    break;
+                }
             }
         }
         if (legal == 0) return inChk ? -MATE + ply : 0;
 
         uint8_t flag = TT_EXACT;
         if (alpha <= originalAlpha) flag = TT_ALPHA;
-        else if (alpha >= beta) flag = TT_BETA;
+        else if (alpha >= originalBeta) flag = TT_BETA;
         tt.store(key, depth, alpha, flag, bestMove);
         return alpha;
     }
