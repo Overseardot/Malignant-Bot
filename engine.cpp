@@ -394,7 +394,11 @@ int evaluate(const Position& pos) {
         int v = VALUE[t] + PST[t - 1][c == WHITE ? (sq ^ 56) : sq];
         score += (c == WHITE) ? v : -v;
     }
-    // Learned adjustments are deliberately small and additive: the hand-tuned\n    // evaluation remains the baseline while self-play can refine it over time.\n    score += (int)llround(machine_learning::score(pos.b, pos.side));\n    return pos.side == WHITE ? score : -score;\n}
+    // Learned adjustments are deliberately small and additive: the hand-tuned
+    // evaluation remains the baseline while self-play can refine it over time.
+    score += (int)llround(machine_learning::score(pos.b, pos.side));
+    return pos.side == WHITE ? score : -score;
+}
 
 // ---------------------------------------------------------------- search
 static const int INF = 30000, MATE = 29000, MAXPLY = 64;
