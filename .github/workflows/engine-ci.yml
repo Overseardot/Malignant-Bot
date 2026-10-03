@@ -1,0 +1,32 @@
+name: Engine CI
+
+on:
+  push:
+    paths:
+      - 'engine.cpp'
+      - 'learning.h'
+      - 'self_play.cpp'
+      - 'wasm_api.cpp'
+      - '.github/workflows/engine-ci.yml'
+  pull_request:
+
+jobs:
+  engine:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build engine
+        run: g++ -O2 -std=c++17 -pthread -Wall -Wextra -pedantic -o engine engine.cpp
+
+      - name: Build self-play trainer
+        run: g++ -O2 -std=c++17 -pthread -Wall -Wextra -pedantic -o self_play self_play.cpp
+
+      - name: Verify start position perft
+        shell: bash
+        run: |
+          printf 'position startpos\ngo perft 5\nquit\n' | ./engine > perft.txt
+          grep -q 'nodes 4865609' perft.txt
+
+      - name: Smoke-test self-play
+        run: ./self_play 1 1 40 10
