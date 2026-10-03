@@ -21,6 +21,7 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include <array>
 #include "learning.h"
 using namespace std;
 
@@ -399,6 +400,88 @@ int evaluate(const Position& pos) {
 static const int INF = 30000, MATE = 29000, MAXPLY = 64;
 static atomic<bool> g_stop(false);
 
+struct Zobrist {
+    uint64_t piece[64][16]{};
+    uint64_t side = 0;
+    uint64_t castle[16]{};
+    uint64_t ep[64]{};
+    bool ready = false;
+
+    static uint64_t mix(uint64_t x) {
+        x += 0x9e3779b97f4a7c15ULL;
+        x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ULL;
+        x = (x ^ (x >> 27)) * 0x94d049bb133111ebULL;
+        return x ^ (x >> 31);
+    }
+
+    void init() {
+        if (ready) return;
+        uint64_t seed = 0x243f6a8885a308d3ULL;
+        for (int sq = 0; sq < 64; ++sq)
+            for (int p = 0; p < 16; ++p)
+                piece[sq][p] = mix(seed += 0x9e3779b97f4a7c15ULL);
+        side = mix(seed += 0x9e3779b97f4a7c15ULL);
+        for (int i = 0; i < 16; ++i) castle[i] = mix(seed += 0x9e3779b97f4a7c15ULL);
+        for (int i = 0; i < 64; ++i) ep[i] = mix(seed += 0x9e3779b97f4a7c15ULL);
+        ready = true;
+    }
+
+    uint64_t hash(const Position& pos) {
+        init();
+        uint64_t h = 0;
+        for (int sq = 0; sq < 64; ++sq)
+            if (pos.b[sq]) h ^= piece[sq][pos.b[sq]];
+        if (pos.side == BLACK) h ^= side;
+        h ^= castle[pos.castle & 15];
+        if (pos.ep >= 0) h ^= ep[pos.ep];
+        return h;
+    }
+};
+
+static Zobrist Z;
+
+enum TTFlag : uint8_t { TT_EXACT = 0, TT_ALPHA = 1, TT_BETA = 2 };
+
+struct TTEntry {
+    uint64_t key = 0;
+    int score = 0;
+    int depth = -1;
+    uint8_t flag = TT_EXACT;
+    Move best;
+};
+
+class TranspositionTable {
+    vector<TTEntry> table;
+public:
+    explicit TranspositionTable(size_t mb = 32) {
+        size_t bytes = mb * 1024ULL * 1024ULL;
+        size_t n = max<size_t>(1, bytes / sizeof(TTEntry));
+        table.resize(n);
+    }
+
+    void clear() {
+        for (auto& e : table) e = TTEntry{};
+    }
+
+    TTEntry* probe(uint64_t key) {
+        TTEntry& e = table[key % table.size()];
+        return e.key == key ? &e : nullptr;
+    }
+
+    void store(uint64_t key, int depth, int score, uint8_t flag, const Move& best) {
+        TTEntry& e = table[key % table.size()];
+        if (e.key != key || depth >= e.depth) {
+            e.key = key;
+            e.depth = depth;
+            e.score = score;
+            e.flag = flag;
+            e.best = best;
+        }
+    }
+};
+
+
+
 string scoreStr(int s) {
     if (abs(s) > MATE - 100) {
         int moves = (MATE - abs(s) + 1) / 2;
@@ -414,6 +497,9 @@ struct Searcher {
     Move rootBest, prevBest;
     bool havePrev = false;
     bool hasMove = false;  // false if the position has no legal move
+    TranspositionTable tt;
+
+    Searcher() : tt(32) {}
 
     long long elapsedMs() const {
         return chrono::duration_cast<chrono::milliseconds>(chrono::steady_clock::now() - t0).count();
@@ -447,56 +533,102 @@ struct Searcher {
     int qsearch(const Position& pos, int alpha, int beta, int ply) {
         if ((++nodes & 2047) == 0) checkTime();
         if (timeUp) return 0;
-        int stand = evaluate(pos);
-        if (ply >= MAXPLY) return stand;
-        if (stand >= beta) return beta;
-        if (stand > alpha) alpha = stand;
-        MoveList ml;
-        pos.genMoves(ml, true);
-        scoreMoves(pos, ml, ply);
-        for (int i = 0; i < ml.n; i++) {
-            pick(ml, i);
-            Position c = pos;
-            if (!c.make(ml.m[i])) continue;
-            int score = -qsearch(c, -beta, -alpha, ply + 1);
-            if (timeUp) return 0;
-            if (score >= beta) return beta;
-            if (score > alpha) alpha = score;
-        }
-        return alpha;
-    }
+        if (ply >= MAXPLY) return evaluate(pos);
 
-    int negamax(const Position& pos, int depth, int alpha, int beta, int ply) {
-        if ((++nodes & 2047) == 0) checkTime();
-        if (timeUp) return 0;
-        if (ply > 0 && pos.halfmove >= 100) return 0;  // fifty-move rule
         bool inChk = pos.inCheck(pos.side);
-        if (inChk && ply < MAXPLY) depth++;  // check extension
-        if (depth <= 0) return qsearch(pos, alpha, beta, ply);
         MoveList ml;
-        pos.genMoves(ml, false);
+        if (inChk) {
+            // In check there is no stand-pat score: every legal check evasion
+            // must be searched, including quiet king moves and interpositions.
+            pos.genMoves(ml, false);
+        } else {
+            int stand = evaluate(pos);
+            if (stand >= beta) return beta;
+            if (stand > alpha) alpha = stand;
+            pos.genMoves(ml, true);
+        }
+
         scoreMoves(pos, ml, ply);
         int legal = 0;
         for (int i = 0; i < ml.n; i++) {
             pick(ml, i);
             Position c = pos;
             if (!c.make(ml.m[i])) continue;
-            legal++;
+            ++legal;
+            int score = -qsearch(c, -beta, -alpha, ply + 1);
+            if (timeUp) return 0;
+            if (score >= beta) return beta;
+            if (score > alpha) alpha = score;
+        }
+
+        if (inChk && legal == 0) return -MATE + ply;
+        return alpha;
+    }
+
+    int negamax(const Position& pos, int depth, int alpha, int beta, int ply) {
+        if ((++nodes & 2047) == 0) checkTime();
+        if (timeUp) return 0;
+        if (ply > 0 && pos.halfmove >= 100) return 0;
+
+        bool inChk = pos.inCheck(pos.side);
+        if (inChk && ply < MAXPLY) depth++;
+        if (depth <= 0) return qsearch(pos, alpha, beta, ply);
+
+        const uint64_t key = Z.hash(pos);
+        const int originalAlpha = alpha;
+        TTEntry* hit = tt.probe(key);
+        if (hit && hit->depth >= depth) {
+            if (hit->flag == TT_EXACT) return hit->score;
+            if (hit->flag == TT_ALPHA) alpha = max(alpha, hit->score);
+            else if (hit->flag == TT_BETA) beta = min(beta, hit->score);
+            if (alpha >= beta) return hit->score;
+        }
+
+        MoveList ml;
+        pos.genMoves(ml, false);
+        scoreMoves(pos, ml, ply);
+
+        if (hit) {
+            for (int i = 0; i < ml.n; ++i) {
+                if (ml.m[i] == hit->best) {
+                    ml.score[i] += 800000;
+                    break;
+                }
+            }
+        }
+
+        int legal = 0;
+        Move bestMove;
+        for (int i = 0; i < ml.n; i++) {
+            pick(ml, i);
+            Position c = pos;
+            if (!c.make(ml.m[i])) continue;
+            ++legal;
             int score = -negamax(c, depth - 1, -beta, -alpha, ply + 1);
             if (timeUp) return 0;
             if (score > alpha) {
                 alpha = score;
+                bestMove = ml.m[i];
                 if (ply == 0) rootBest = ml.m[i];
                 if (alpha >= beta) break;
             }
         }
-        if (legal == 0) return inChk ? -MATE + ply : 0;  // checkmate or stalemate
+        if (legal == 0) return inChk ? -MATE + ply : 0;
+
+        uint8_t flag = TT_EXACT;
+        if (alpha <= originalAlpha) flag = TT_ALPHA;
+        else if (alpha >= beta) flag = TT_BETA;
+        tt.store(key, depth, alpha, flag, bestMove);
         return alpha;
     }
 
     Move run(const Position& root, long long limit, int maxDepth, bool verbose = true) {
         limitMs = limit;
         t0 = chrono::steady_clock::now();
+        Z.init();
+        tt.clear();
+        nodes = 0;
+        timeUp = false;
         MoveList ml;
         root.genMoves(ml, false);
         Move best;
