@@ -37,7 +37,7 @@ static bool terminalResult(const Position& pos, int& winner) {
 
 int main(int argc, char** argv) {
     int games = argc > 1 ? max(1, atoi(argv[1])) : 100;
-    long long moveMs = argc > 2 ? max(1, atoll(argv[2])) : 25;
+    long long moveMs = argc > 2 ? max(1LL, atoll(argv[2])) : 25;
     int maxPlies = argc > 3 ? max(20, atoi(argv[3])) : 250;
     int exploration = argc > 4 ? max(0, min(100, atoi(argv[4]))) : 5;
 
