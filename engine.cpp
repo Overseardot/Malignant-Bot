@@ -1,4 +1,4 @@
-// engine.cpp - MiniChess: a small UCI chess engine to build on.
+// engine.cpp - Malingnant-Bot chess engine.
 //
 // Build:  g++ -O2 -std=c++17 -pthread -o engine engine.cpp
 // Run:    ./engine        then type:  uci
@@ -385,17 +385,112 @@ static const int PST[6][64] = {
         20, 30, 10,  0,  0, 10, 30, 20}};
 
 // Score in centipawns from the side to move's point of view.
+// This deliberately stays lightweight: the search can evaluate millions of
+// positions, so every feature here is incremental-by-scan and allocation-free.
 int evaluate(const Position& pos) {
     int score = 0;
-    for (int sq = 0; sq < 64; sq++) {
+    int pieceCount[2][7]{};
+    int pawns[2][8]{};
+    int bishops[2] = {};
+    int rooks[2][8]{};
+    int kingSq[2] = {-1, -1};
+
+    for (int sq = 0; sq < 64; ++sq) {
         int p = pos.b[sq];
         if (p == EMPTY) continue;
         int t = typeOf(p), c = colorOf(p);
+        pieceCount[c][t]++;
+        if (t == PAWN) pawns[c][fileOf(sq)]++;
+        if (t == BISHOP) bishops[c]++;
+        if (t == ROOK) rooks[c][fileOf(sq)]++;
+        if (t == KING) kingSq[c] = sq;
         int v = VALUE[t] + PST[t - 1][c == WHITE ? (sq ^ 56) : sq];
         score += (c == WHITE) ? v : -v;
     }
-    // Learned adjustments are deliberately small and additive: the hand-tuned
-    // evaluation remains the baseline while self-play can refine it over time.
+
+    // Bishop pair.
+    if (bishops[WHITE] >= 2) score += 32;
+    if (bishops[BLACK] >= 2) score -= 32;
+
+    // Pawn structure: doubled, isolated and passed pawns.
+    for (int c = WHITE; c <= BLACK; ++c) {
+        int sign = c == WHITE ? 1 : -1;
+        for (int f = 0; f < 8; ++f) {
+            if (pawns[c][f] > 1) score += sign * -14 * (pawns[c][f] - 1);
+            if (pawns[c][f] && (f == 0 || !pawns[c][f-1]) &&
+                (f == 7 || !pawns[c][f+1]))
+                score += sign * -10;
+        }
+        for (int sq = 0; sq < 64; ++sq) {
+            if (typeOf(pos.b[sq]) != PAWN || colorOf(pos.b[sq]) != c) continue;
+            int f = fileOf(sq), r = rankOf(sq);
+            bool passed = true;
+            for (int nf = max(0, f - 1); nf <= min(7, f + 1); ++nf) {
+                if (c == WHITE) {
+                    for (int rr = r + 1; rr < 8; ++rr)
+                        if (pos.b[rr * 8 + nf] == makePiece(BLACK, PAWN)) passed = false;
+                } else {
+                    for (int rr = r - 1; rr >= 0; --rr)
+                        if (pos.b[rr * 8 + nf] == makePiece(WHITE, PAWN)) passed = false;
+                }
+            }
+            if (passed) {
+                int advance = c == WHITE ? r - 1 : 6 - r;
+                score += sign * (20 + max(0, advance) * 8);
+            }
+        }
+    }
+
+    // Rooks like open and semi-open files.
+    for (int c = WHITE; c <= BLACK; ++c) {
+        int sign = c == WHITE ? 1 : -1;
+        for (int f = 0; f < 8; ++f) {
+            if (!rooks[c][f]) continue;
+            bool wp = pawns[WHITE][f] != 0, bp = pawns[BLACK][f] != 0;
+            if (!wp && !bp) score += sign * 20 * rooks[c][f];
+            else if ((c == WHITE && !wp) || (c == BLACK && !bp))
+                score += sign * 10 * rooks[c][f];
+        }
+    }
+
+    // Development/central control through legal move counts. This is intentionally
+    // modest because mobility is expensive and should not dominate material.
+    for (int c = WHITE; c <= BLACK; ++c) {
+        Position q = pos;
+        q.side = c;
+        MoveList ml;
+        q.genMoves(ml, false);
+        int legal = 0;
+        for (int i = 0; i < ml.n; ++i) {
+            Position n = q;
+            if (n.make(ml.m[i])) ++legal;
+        }
+        score += (c == WHITE ? 1 : -1) * min(legal, 40) * 2;
+    }
+
+    // King safety: penalize exposed kings in the middlegame; scale down as pieces
+    // disappear so the engine can activate its king in endgames.
+    int totalNonPawns = 0;
+    for (int c = WHITE; c <= BLACK; ++c)
+        for (int t = KNIGHT; t <= QUEEN; ++t) totalNonPawns += pieceCount[c][t];
+    if (totalNonPawns >= 6) {
+        for (int c = WHITE; c <= BLACK; ++c) {
+            if (kingSq[c] < 0) continue;
+            int f = fileOf(kingSq[c]), r = rankOf(kingSq[c]);
+            int danger = 0;
+            for (int df = -1; df <= 1; ++df) for (int dr = -1; dr <= 1; ++dr) {
+                if (!df && !dr) continue;
+                int nf = f + df, nr = r + dr;
+                if (!inBoard(nf, nr)) continue;
+                int sq = nr * 8 + nf;
+                int enemy = c ^ 1;
+                if (pos.attacked(sq, enemy)) danger++;
+            }
+            score += (c == WHITE ? 1 : -1) * (-12 * danger);
+        }
+    }
+
+    // Learned adjustments are deliberately small and additive.
     score += (int)llround(machine_learning::score(pos.b, pos.side));
     return pos.side == WHITE ? score : -score;
 }
@@ -522,7 +617,9 @@ struct Searcher {
             if (ply == 0 && havePrev && m == prevBest) s = 1000000;
             else if (m.flags & F_CAPTURE) {
                 int victim = (m.flags & F_EP) ? PAWN : typeOf(pos.b[m.to]);
-                s = 100000 + victim * 10 - typeOf(pos.b[m.from]);
+                int attacker = typeOf(pos.b[m.from]);
+                s = 100000 + victim * 100 - attacker * 8;
+                if (m.promo) s += 80000;
             }
             if (m.promo) s += 90000 + m.promo;
             if (!(m.flags & F_CAPTURE) && !m.promo) {
@@ -596,10 +693,30 @@ struct Searcher {
             if (alpha >= beta) return hit->score;
         }
 
+        // Null-move pruning: skip a turn in positions where we have enough
+        // material and are not in check. Never use it near the horizon.
+        if (!inChk && depth >= 3 && beta < MATE - 100) {
+            int nonPawn = 0;
+            for (int sq = 0; sq < 64; ++sq) {
+                int p = pos.b[sq];
+                if (p && colorOf(p) == pos.side && typeOf(p) >= KNIGHT && typeOf(p) <= QUEEN)
+                    nonPawn += VALUE[typeOf(p)];
+            }
+            if (nonPawn >= 500) {
+                Position n = pos;
+                n.side ^= 1;
+                n.ep = -1;
+                n.halfmove++;
+                int reduction = 2 + depth / 4;
+                int score = -negamax(n, depth - 1 - reduction, -beta, -beta + 1, ply + 1);
+                if (timeUp) return 0;
+                if (score >= beta) return beta;
+            }
+        }
+
         MoveList ml;
         pos.genMoves(ml, false);
         scoreMoves(pos, ml, ply);
-
         if (hit) {
             for (int i = 0; i < ml.n; ++i) {
                 if (ml.m[i] == hit->best) {
@@ -610,20 +727,33 @@ struct Searcher {
         }
 
         int legal = 0;
+        int moveIndex = 0;
         Move bestMove;
-        for (int i = 0; i < ml.n; i++) {
+        for (int i = 0; i < ml.n; ++i) {
             pick(ml, i);
             Position c = pos;
             if (!c.make(ml.m[i])) continue;
             ++legal;
-            int score = -negamax(c, depth - 1, -beta, -alpha, ply + 1);
+
+            int score;
+            bool quiet = !(ml.m[i].flags & F_CAPTURE) && !ml.m[i].promo;
+            if (moveIndex >= 4 && depth >= 3 && quiet && !inChk) {
+                int reduction = 1 + (moveIndex >= 10) + (depth >= 6);
+                score = -negamax(c, depth - 1 - reduction, -alpha - 1, -alpha, ply + 1);
+                if (score > alpha)
+                    score = -negamax(c, depth - 1, -beta, -alpha, ply + 1);
+            } else {
+                score = -negamax(c, depth - 1, -beta, -alpha, ply + 1);
+            }
             if (timeUp) return 0;
+            ++moveIndex;
+
             if (score > alpha) {
                 alpha = score;
                 bestMove = ml.m[i];
                 if (ply == 0) rootBest = ml.m[i];
                 if (alpha >= beta) {
-                    if (!(ml.m[i].flags & F_CAPTURE) && !ml.m[i].promo && ply < MAXPLY) {
+                    if (quiet && ply < MAXPLY) {
                         if (!(ml.m[i] == killer[ply][0])) {
                             killer[ply][1] = killer[ply][0];
                             killer[ply][0] = ml.m[i];
@@ -648,7 +778,8 @@ struct Searcher {
         limitMs = limit;
         t0 = chrono::steady_clock::now();
         Z.init();
-        tt.clear();
+        // Keep TT entries across iterative-deepening iterations so the
+        // previous depth provides ordering and bounds to the next depth.
         nodes = 0;
         timeUp = false;
         MoveList ml;
@@ -711,7 +842,7 @@ int main() {
         string cmd;
         ss >> cmd;
         if (cmd == "uci") {
-            cout << "id name MiniChess\nid author you\nuciok" << endl;
+            cout << "id name Malingnant-Bot\nid author Overseardot\nuciok" << endl;
         } else if (cmd == "isready") {
             cout << "readyok" << endl;
         } else if (cmd == "ucinewgame") {
