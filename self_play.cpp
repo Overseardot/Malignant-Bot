@@ -8,7 +8,7 @@
 //   arguments: games, milliseconds per move, max plies, exploration percent
 //
 // Training flow:
-//   self-play -> record positions -> game result -> TD-style weight updates -> save
+//   self-play -> record positions -> final game result -> bounded outcome updates -> save
 // The search engine remains the same; learning changes only its evaluation.
 
 #define NO_MAIN
