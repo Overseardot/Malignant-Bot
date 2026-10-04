@@ -622,22 +622,87 @@
             return moves;
         }
 
+        // The C++ engine is the single source of truth for the chess position.
+        // The browser only renders that position and sends moves to the engine.
+        const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+        let engineFen = START_FEN;
+
+        function fenToBoard(fen) {
+            const placement = fen.split(' ')[0];
+            return placement.split('/').map(row => {
+                const out = [];
+                for (const ch of row) {
+                    if (/\\d/.test(ch)) {
+                        for (let i = 0; i < Number(ch); i++) out.push(null);
+                    } else out.push(ch);
+                }
+                while (out.length < 8) out.push(null);
+                return out;
+            });
+        }
+
+        function sideFromFen(fen) {
+            return fen.split(' ')[1] === 'b' ? 'B' : 'W';
+        }
+
+        function squareToCoords(square) {
+            return { c: square.charCodeAt(0) - 97, r: 8 - Number(square[1]) };
+        }
+
+        function coordsToSquare(r, c) {
+            return String.fromCharCode(97 + c) + String(8 - r);
+        }
+
+        function engineCall(name, returnType, argTypes, args) {
+            if (!machine) return '';
+            return machine.ccall(name, returnType, argTypes, args) || '';
+        }
+
+        function getEngineLegalMoves() {
+            const text = engineCall('engine_legal_moves', 'string', ['string'], [engineFen]);
+            return text ? text.trim().split(/\\s+/) : [];
+        }
+
+        function syncBoardFromEngine() {
+            board = fenToBoard(engineFen);
+            currentTurn = sideFromFen(engineFen);
+        }
+
+        function refreshEngineState() {
+            syncBoardFromEngine();
+            selected = null;
+            validMoves = [];
+            renderBoard();
+            updateUI();
+        }
+
         function onTileClick(r, c) {
-            const piece = board[r][c];
+            if (!machine) {
+                addLog('[BRAIN OFFLINE]: C++ engine is not ready.', 'red');
+                return;
+            }
+
+            const square = coordsToSquare(r, c);
+            const legal = getEngineLegalMoves();
 
             if (selected) {
-                const isPossible = validMoves.some(m => m.r === r && m.c === c);
-                if (isPossible) {
-                    makeMove(selected.r, selected.c, r, c);
-                    selected = null;
-                    validMoves = [];
+                const matching = legal.filter(m => m.slice(2, 4) === square &&
+                    m.slice(0, 2) === coordsToSquare(selected.r, selected.c));
+                if (matching.length) {
+                    // Automatically choose queen promotion when several promotion
+                    // moves exist. The engine remains authoritative about legality.
+                    const move = matching.find(m => m.length === 5 && m[4] === 'q') || matching[0];
+                    applyEngineMove(move, 'human');
                     return;
                 }
             }
 
+            const piece = board[r][c];
             if (piece && ((currentTurn === 'W' && isWhite(piece)) || (currentTurn === 'B' && isBlack(piece)))) {
                 selected = { r, c };
-                validMoves = getMoves(r, c);
+                validMoves = legal
+                    .filter(m => m.slice(0, 2) === square)
+                    .map(m => squareToCoords(m.slice(2, 4)));
             } else {
                 selected = null;
                 validMoves = [];
@@ -645,12 +710,19 @@
             renderBoard();
         }
 
-        function makeMove(fromR, fromC, toR, toC) {
-            const piece = board[fromR][fromC];
-            const target = board[toR][toC];
+        function applyEngineMove(uci, source = 'engine') {
+            const before = engineFen;
+            const from = squareToCoords(uci.slice(0, 2));
+            const to = squareToCoords(uci.slice(2, 4));
+            const piece = board[from.r]?.[from.c];
+            const target = board[to.r]?.[to.c];
 
-            board[toR][toC] = piece;
-            board[fromR][fromC] = null;
+            const nextFen = engineCall('engine_apply_move', 'string', ['string', 'string'], [before, uci]);
+            if (!nextFen) {
+                addLog('[ENGINE ERROR]: Illegal move rejected by C++.', 'red');
+                refreshEngineState();
+                return false;
+            }
 
             if (target) {
                 if (isWhite(target)) capturedBlack.push(target);
@@ -661,34 +733,37 @@
             }
 
             const files = ['a','b','c','d','e','f','g','h'];
-            history.push({ player: currentTurn, move: `${piece.toUpperCase()}${files[fromC]}${8-fromR}→${files[toC]}${8-toC}` });
+            let moveLabel = piece ? piece.toUpperCase() : '';
+            moveLabel += files[from.c] + (8 - from.r) + '→' + files[to.c] + (8 - to.r);
+            if (uci.length === 5) moveLabel += '=' + uci[4].toUpperCase();
+            history.push({ player: currentTurn, move: moveLabel });
 
-            currentTurn = currentTurn === 'W' ? 'B' : 'W';
-
+            engineFen = nextFen;
+            syncBoardFromEngine();
+            selected = null;
+            validMoves = [];
             updateUI();
             renderBoard();
 
-            if (currentTurn === 'B' && !isAutoPlay) {
+            const status = engineCall('engine_status', 'string', ['string'], [engineFen]);
+            if (status === 'check') addLog('[ENGINE]: Check.', 'red');
+            if (status === 'checkmate') addLog('[ENGINE]: Checkmate.', 'red');
+            if (status === 'stalemate') addLog('[ENGINE]: Stalemate.', 'red');
+            if (status === 'draw-50' || status === 'draw-material') addLog('[ENGINE]: ' + status + '.', 'red');
+
+            if (status === 'checkmate' || status === 'stalemate' || status === 'draw-50' || status === 'draw-material') return true;
+
+            if (source === 'human' && currentTurn === 'B' && !isAutoPlay) {
                 setTimeout(botTurn, 600);
             } else if (isAutoPlay) {
                 setTimeout(botTurn, 500);
             }
+            return true;
         }
 
         function boardToFen() {
-            const rows = board.map(row => {
-                let fen = '', empty = 0;
-                for (const p of row) {
-                    if (!p) empty++;
-                    else {
-                        if (empty) { fen += empty; empty = 0; }
-                        fen += p;
-                    }
-                }
-                if (empty) fen += empty;
-                return fen;
-            });
-            return rows.join('/') + ' ' + currentTurn.toLowerCase() + ' - - 0 ' + (Math.floor(history.length / 2) + 1);
+            // Kept for compatibility/debugging. The engineFen is authoritative.
+            return engineFen;
         }
 
         let machine = null;
@@ -698,7 +773,11 @@
                 return;
             }
             machine = await createEngine();
-            addLog('[BRAIN ONLINE]: C++ WASM engine connected.', 'red');
+            engineFen = START_FEN;
+            syncBoardFromEngine();
+            renderBoard();
+            updateUI();
+            addLog('[BRAIN ONLINE]: C++ WASM engine connected and synchronized.', 'red');
         }
 
         function botTurn() {
@@ -706,23 +785,23 @@
                 addLog('[BRAIN OFFLINE]: Waiting for C++ engine.', 'red');
                 return;
             }
+            if (currentTurn !== 'B') return;
 
-            const fen = boardToFen();
+            const status = engineCall('engine_status', 'string', ['string'], [engineFen]);
+            if (status !== 'ongoing' && status !== 'check') {
+                addLog('[ENGINE]: Position is terminal (' + status + ').', 'red');
+                return;
+            }
+
             const ms = activePersonality === 'novice' ? 100 : activePersonality === 'aggressive' ? 500 : 1000;
-            const uci = machine.ccall('engine_best_move', 'string', ['string', 'number'], [fen, ms]);
-
+            const uci = engineCall('engine_best_move', 'string', ['string', 'number'], [engineFen, ms]);
             if (!uci) {
                 addLog('[ENGINE]: No legal move. Position is terminal.', 'red');
                 return;
             }
 
-            const fromC = uci.charCodeAt(0) - 97;
-            const fromR = 8 - Number(uci[1]);
-            const toC = uci.charCodeAt(2) - 97;
-            const toR = 8 - Number(uci[3]);
-
-            addLog(`[NEURAL EXECUTION]: C++ engine selected ${uci}.`, 'red');
-            makeMove(fromR, fromC, toR, toC);
+            addLog('[NEURAL EXECUTION]: C++ engine selected ' + uci + '.', 'red');
+            applyEngineMove(uci, 'engine');
         }
 
         /* ===================================================================
@@ -791,7 +870,8 @@
         }
 
         function resetGame() {
-            board = JSON.parse(JSON.stringify(INITIAL_BOARD));
+            engineFen = START_FEN;
+            board = fenToBoard(engineFen);
             currentTurn = 'W';
             selected = null;
             validMoves = [];
@@ -800,7 +880,7 @@
             capturedBlack = [];
             renderBoard();
             updateUI();
-            addLog('[SYSTEM PURGE]: Board state restored to origin.', 'white');
+            addLog('[SYSTEM PURGE]: C++ engine position restored to origin.', 'white');
         }
 
         // Initialize Application
