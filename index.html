@@ -125,8 +125,26 @@
             cursor: grabbing;
         }
 
-        #chessboard { display:grid; grid-template-columns:repeat(8,minmax(0,1fr)); grid-template-rows:repeat(8,minmax(0,1fr)); width:100%; height:100%; touch-action:none; }
-        #chessboard > div { min-width:0; min-height:0; }
+        #chessboard {
+            display:grid;
+            grid-template-columns:repeat(8,minmax(0,1fr));
+            grid-template-rows:repeat(8,minmax(0,1fr));
+            width:100%;
+            height:100%;
+            touch-action:none;
+            user-select:none;
+        }
+        #chessboard > div {
+            min-width:0;
+            min-height:0;
+            position:relative;
+            touch-action:none;
+        }
+        #chessboard .chess-piece,
+        #chessboard .chess-piece svg {
+            pointer-events:none !important;
+            user-select:none;
+        }
 
         .piece-white-glow {
             filter: drop-shadow(0 0 6px rgba(255, 255, 255, 0.85)) drop-shadow(0 2px 4px rgba(0,0,0,0.9));
@@ -349,7 +367,7 @@
 
     </main>
 
-    <script src="engine.js?v=malignant-20261004"></script>
+    <script src="engine.js?v=malignant-20261004-fix2"></script>
 
     <script>
         /* ===================================================================
@@ -660,9 +678,12 @@
                 return '';
             }
             try {
-                return machine.ccall(name, returnType, argTypes, args) || '';
+                const result = machine.ccall(name, returnType, argTypes, args);
+                return result == null ? '' : String(result);
             } catch (e) {
-                addLog('[WASM ERROR]: ' + name + ' failed.', 'red');
+                const message = e && e.message ? e.message : String(e);
+                addLog('[WASM ERROR]: ' + name + ' — ' + message, 'red');
+                console.error('[WASM ERROR]', name, e);
                 return '';
             }
         }
@@ -729,20 +750,27 @@
             if (!boardEl || boardEl.dataset.inputReady === '1') return;
             boardEl.dataset.inputReady = '1';
 
-            const activate = (event) => {
-                const tile = event.target.closest('[data-square]');
+            boardEl.addEventListener('pointerdown', (event) => {
+                const target = event.target;
+                const tile = target && typeof target.closest === 'function'
+                    ? target.closest('[data-square]')
+                    : null;
                 if (!tile || !boardEl.contains(tile)) return;
-                event.preventDefault();
-                const coords = squareToCoords(tile.dataset.square);
-                onTileClick(coords.r, coords.c);
-            };
 
-            boardEl.addEventListener('click', activate);
-            boardEl.addEventListener('touchend', activate, { passive: false });
+                event.preventDefault();
+                event.stopPropagation();
+
+                const square = tile.dataset.square;
+                if (!square || square.length !== 2) return;
+
+                const coords = squareToCoords(square);
+                onTileClick(coords.r, coords.c);
+            }, { passive: false });
+
             boardEl.addEventListener('keydown', (event) => {
                 if (event.key !== 'Enter' && event.key !== ' ') return;
                 const tile = event.target.closest('[data-square]');
-                if (!tile) return;
+                if (!tile || !boardEl.contains(tile)) return;
                 event.preventDefault();
                 const coords = squareToCoords(tile.dataset.square);
                 onTileClick(coords.r, coords.c);
@@ -750,13 +778,18 @@
         }
 
         function onTileClick(r, c) {
-            if (!machine) {
+            if (!machine || typeof machine.ccall !== 'function') {
                 addLog('[BRAIN OFFLINE]: C++ engine is not ready.', 'red');
                 return;
             }
+            if (r < 0 || r > 7 || c < 0 || c > 7) return;
 
             const square = coordsToSquare(r, c);
             const legal = getEngineLegalMoves();
+            if (!legal.length) {
+                addLog('[ENGINE]: No legal moves returned for ' + engineFen, 'red');
+                return;
+            }
 
             if (selected) {
                 const from = coordsToSquare(selected.r, selected.c);
