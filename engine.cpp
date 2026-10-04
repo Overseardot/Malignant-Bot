@@ -6,23 +6,31 @@
 //                                     position startpos moves e2e4
 //                                     go movetime 1000
 // Check:  position startpos   then   go perft 5   (should print 4865609)
+//         position startpos   then   go keycheck 4  (hash keys stay consistent)
 //
-// What it has: legal move generation (castling, en passant, promotion),
-// iterative-deepening alpha-beta, quiescence search, MVV-LVA move ordering,
-// material + piece-square evaluation, and a UCI interface with time control.
+// Move generation: legal moves incl. castling, en passant, promotion (perft-verified).
+// Search: iterative deepening, aspiration windows, principal variation search,
+//         transposition table, null-move pruning, late move reductions, futility
+//         pruning, check extensions, killer + history move ordering, quiescence
+//         search, repetition and fifty-move draw detection.
+// Evaluation: tapered middlegame/endgame piece-square tables, pawn structure
+//         (passed/doubled/isolated), bishop pair, rook files, mobility, king shelter.
+// Protocol: UCI with time control and a Hash option.
 
 #include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <iostream>
 #include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
 #include <array>
-#include "learning.h"
+#include <cmath>
+#include "learning.h"   // machine_learning::score(board, side): small learned eval adjustment
 using namespace std;
 
 // ---------------------------------------------------------------- basics
@@ -59,22 +67,64 @@ struct MoveList {
     int n = 0;
 };
 
+// ---------------------------------------------------------------- zobrist hashing
+static uint64_t Z_PIECE[16][64], Z_CASTLE[16], Z_EP[8], Z_SIDE;
+
+static uint64_t splitmix(uint64_t& x) {
+    uint64_t z = (x += 0x9e3779b97f4a7c15ULL);
+    z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ULL;
+    z = (z ^ (z >> 27)) * 0x94d049bb133111ebULL;
+    return z ^ (z >> 31);
+}
+
+static struct ZobristInit {
+    ZobristInit() {
+        uint64_t s = 0x4d696e6943686573ULL;
+        for (auto& row : Z_PIECE) for (auto& v : row) v = splitmix(s);
+        for (auto& v : Z_CASTLE) v = splitmix(s);
+        for (auto& v : Z_EP) v = splitmix(s);
+        Z_SIDE = splitmix(s);
+    }
+} zobristInit;
+
 // ---------------------------------------------------------------- position
 struct Position {
-    int b[64];
+    int b[64];       // int (not uint8_t) because learning.h reads this array
     int side = WHITE;
     int castle = 0;  // bit 1 = white O-O, 2 = white O-O-O, 4 = black O-O, 8 = black O-O-O
-    int ep = -1;     // en passant target square, or -1
+    int ep = -1;     // en passant target square, only set when a pawn can really capture there
     int halfmove = 0;
+    uint64_t key = 0;
 
-    Position() { for (int i = 0; i < 64; i++) b[i] = EMPTY; }
+    Position() { memset(b, 0, sizeof(b)); }
+
+    uint64_t computeKey() const {
+        uint64_t k = 0;
+        for (int sq = 0; sq < 64; sq++)
+            if (b[sq]) k ^= Z_PIECE[b[sq]][sq];
+        k ^= Z_CASTLE[castle];
+        if (ep >= 0) k ^= Z_EP[fileOf(ep)];
+        if (side == BLACK) k ^= Z_SIDE;
+        return k;
+    }
+
+    // Could the side to move capture en passant on square `sq`?
+    bool epCapturable(int sq) const {
+        int pr = rankOf(sq) + (side == WHITE ? -1 : 1);
+        if (pr < 0 || pr > 7) return false;
+        for (int df = -1; df <= 1; df += 2) {
+            int f = fileOf(sq) + df;
+            if (f >= 0 && f < 8 && b[pr * 8 + f] == makePiece(side, PAWN)) return true;
+        }
+        return false;
+    }
 
     void setFEN(const string& fen) {
         istringstream ss(fen);
         string pos, stm, cas, eps;
         ss >> pos >> stm >> cas >> eps;
         if (!(ss >> halfmove)) halfmove = 0;
-        for (int i = 0; i < 64; i++) b[i] = EMPTY;
+        memset(b, 0, sizeof(b));
         int r = 7, f = 0;
         for (char c : pos) {
             if (c == '/') { r--; f = 0; }
@@ -103,6 +153,8 @@ struct Position {
         }
         ep = (eps.size() == 2 && eps[0] >= 'a' && eps[0] <= 'h')
                  ? (eps[0] - 'a') + 8 * (eps[1] - '1') : -1;
+        if (ep >= 0 && !epCapturable(ep)) ep = -1;
+        key = computeKey();
     }
 
     string toFEN() const {
@@ -258,18 +310,31 @@ struct Position {
         }
     }
 
-    // Plays the move on this position. Returns false if it leaves our king in check.
-    // (Search uses copy-make: copy the position, call make() on the copy.)
+    // Plays the move on this position, updating the hash incrementally. Returns false
+    // if it leaves our king in check. (Search uses copy-make: copy, then make() the copy.)
     bool make(const Move& m) {
-        int p = b[m.from], us = side;
-        b[m.to] = p;
+        int p = b[m.from], us = side, captured = b[m.to];
+        key ^= Z_PIECE[p][m.from];
+        if (captured) key ^= Z_PIECE[captured][m.to];
         b[m.from] = EMPTY;
-        if (m.flags & F_EP) b[m.to + (us == WHITE ? -8 : 8)] = EMPTY;
-        if (m.promo) b[m.to] = makePiece(us, m.promo);
-        if (m.flags & F_CASTLE) {
-            if (m.to == m.from + 2) { b[m.from + 1] = b[m.from + 3]; b[m.from + 3] = EMPTY; }
-            else { b[m.from - 1] = b[m.from - 4]; b[m.from - 4] = EMPTY; }
+        if (m.flags & F_EP) {
+            int cs = m.to + (us == WHITE ? -8 : 8);
+            key ^= Z_PIECE[b[cs]][cs];
+            b[cs] = EMPTY;
         }
+        int placed = m.promo ? makePiece(us, m.promo) : p;
+        b[m.to] = placed;
+        key ^= Z_PIECE[placed][m.to];
+        if (m.flags & F_CASTLE) {
+            int rf, rt;
+            if (m.to == m.from + 2) { rf = m.from + 3; rt = m.from + 1; }
+            else { rf = m.from - 4; rt = m.from - 1; }
+            int rook = b[rf];
+            key ^= Z_PIECE[rook][rf] ^ Z_PIECE[rook][rt];
+            b[rt] = rook;
+            b[rf] = EMPTY;
+        }
+        key ^= Z_CASTLE[castle];
         auto upd = [&](int sq) {
             if (sq == 4) castle &= ~3;
             if (sq == 60) castle &= ~12;
@@ -280,10 +345,25 @@ struct Position {
         };
         upd(m.from);
         upd(m.to);
-        ep = (m.flags & F_DOUBLE) ? (m.from + m.to) / 2 : -1;
+        key ^= Z_CASTLE[castle];
+        if (ep >= 0) key ^= Z_EP[fileOf(ep)];
+        ep = -1;
         halfmove = (typeOf(p) == PAWN || (m.flags & F_CAPTURE)) ? 0 : halfmove + 1;
         side ^= 1;
+        key ^= Z_SIDE;
+        if (m.flags & F_DOUBLE) {
+            int mid = (m.from + m.to) / 2;
+            if (epCapturable(mid)) { ep = mid; key ^= Z_EP[fileOf(mid)]; }
+        }
         return !inCheck(us);
+    }
+
+    // "Pass" the move (used by null-move pruning).
+    void makeNull() {
+        if (ep >= 0) { key ^= Z_EP[fileOf(ep)]; ep = -1; }
+        side ^= 1;
+        key ^= Z_SIDE;
+        halfmove++;
     }
 };
 
@@ -325,9 +405,11 @@ bool parseMove(const Position& pos, const string& s, Move& out) {
 }
 
 // ---------------------------------------------------------------- evaluation
-static const int VALUE[7] = {0, 100, 320, 330, 500, 900, 0};
+static const int VAL_MG[7] = {0, 100, 320, 330, 500, 900, 0};
+static const int VAL_EG[7] = {0, 115, 300, 320, 530, 930, 0};
 
 // Piece-square tables, written from White's point of view with rank 8 on top.
+// Index = piece type - 1. The pawn/king rows are middlegame; the endgame versions follow.
 static const int PST[6][64] = {
     {  // pawn
          0,  0,  0,  0,  0,  0,  0,  0,
@@ -384,202 +466,162 @@ static const int PST[6][64] = {
         20, 20,  0,  0,  0,  0, 20, 20,
         20, 30, 10,  0,  0, 10, 30, 20}};
 
+static const int KING_EG[64] = {
+    -50,-40,-30,-20,-20,-30,-40,-50,
+    -30,-20,-10,  0,  0,-10,-20,-30,
+    -30,-10, 20, 30, 30, 20,-10,-30,
+    -30,-10, 30, 40, 40, 30,-10,-30,
+    -30,-10, 30, 40, 40, 30,-10,-30,
+    -30,-10, 20, 30, 30, 20,-10,-30,
+    -30,-30,  0,  0,  0,  0,-30,-30,
+    -50,-30,-30,-30,-30,-30,-30,-50};
+
+static const int PAWN_EG_ADV[8] = {0, 0, 2, 5, 10, 18, 30, 0};   // by relative rank
+static const int PASSED_MG[8] = {0, 2, 5, 10, 20, 35, 55, 0};
+static const int PASSED_EG[8] = {0, 5, 15, 30, 55, 90, 140, 0};
+
 // Score in centipawns from the side to move's point of view.
-// This deliberately stays lightweight: the search can evaluate millions of
-// positions, so every feature here is incremental-by-scan and allocation-free.
 int evaluate(const Position& pos) {
-    int score = 0;
-    int pieceCount[2][7]{};
-    int pawns[2][8]{};
-    int bishops[2] = {};
-    int rooks[2][8]{};
-    int kingSq[2] = {-1, -1};
+    int mg = 0, eg = 0, phase = 0;
+    int pawnCnt[2][8] = {}, minR[2][8], maxR[2][8];
+    for (int c = 0; c < 2; c++)
+        for (int f = 0; f < 8; f++) { minR[c][f] = 8; maxR[c][f] = -1; }
+    int bishops[2] = {0, 0}, kingSq[2] = {0, 0};
+    int pawns = 0, minors = 0, majors = 0;
 
-    for (int sq = 0; sq < 64; ++sq) {
+    // Pass 1: material, piece-square tables, pawn bookkeeping.
+    for (int sq = 0; sq < 64; sq++) {
         int p = pos.b[sq];
-        if (p == EMPTY) continue;
-        int t = typeOf(p), c = colorOf(p);
-        pieceCount[c][t]++;
-        if (t == PAWN) pawns[c][fileOf(sq)]++;
-        if (t == BISHOP) bishops[c]++;
-        if (t == ROOK) rooks[c][fileOf(sq)]++;
-        if (t == KING) kingSq[c] = sq;
-        int v = VALUE[t] + PST[t - 1][c == WHITE ? (sq ^ 56) : sq];
-        score += (c == WHITE) ? v : -v;
-    }
-
-    // Bishop pair.
-    if (bishops[WHITE] >= 2) score += 32;
-    if (bishops[BLACK] >= 2) score -= 32;
-
-    // Pawn structure: doubled, isolated and passed pawns.
-    for (int c = WHITE; c <= BLACK; ++c) {
-        int sign = c == WHITE ? 1 : -1;
-        for (int f = 0; f < 8; ++f) {
-            if (pawns[c][f] > 1) score += sign * -14 * (pawns[c][f] - 1);
-            if (pawns[c][f] && (f == 0 || !pawns[c][f-1]) &&
-                (f == 7 || !pawns[c][f+1]))
-                score += sign * -10;
+        if (!p) continue;
+        int t = typeOf(p), c = colorOf(p), f = fileOf(sq), r = rankOf(sq);
+        int idx = (c == WHITE) ? (sq ^ 56) : sq;
+        int sgn = (c == WHITE) ? 1 : -1;
+        int pm = PST[t - 1][idx], pe = pm;
+        if (t == KING) pe = KING_EG[idx];
+        else if (t == PAWN) pe = PAWN_EG_ADV[c == WHITE ? r : 7 - r];
+        mg += sgn * (VAL_MG[t] + pm);
+        eg += sgn * (VAL_EG[t] + pe);
+        switch (t) {
+            case PAWN:
+                pawns++;
+                pawnCnt[c][f]++;
+                minR[c][f] = min(minR[c][f], r);
+                maxR[c][f] = max(maxR[c][f], r);
+                break;
+            case KNIGHT: minors++; phase += 1; break;
+            case BISHOP: minors++; phase += 1; bishops[c]++; break;
+            case ROOK: majors++; phase += 2; break;
+            case QUEEN: majors++; phase += 4; break;
+            case KING: kingSq[c] = sq; break;
         }
-        for (int sq = 0; sq < 64; ++sq) {
-            if (typeOf(pos.b[sq]) != PAWN || colorOf(pos.b[sq]) != c) continue;
-            int f = fileOf(sq), r = rankOf(sq);
+    }
+    if (pawns == 0 && majors == 0 && minors <= 1) return 0;  // dead draw
+
+    // Pass 2: pawn structure, mobility, rooks.
+    for (int sq = 0; sq < 64; sq++) {
+        int p = pos.b[sq];
+        if (!p) continue;
+        int t = typeOf(p), c = colorOf(p), f = fileOf(sq), r = rankOf(sq);
+        int sgn = (c == WHITE) ? 1 : -1;
+        if (t == PAWN) {
+            int rel = (c == WHITE) ? r : 7 - r;
             bool passed = true;
-            for (int nf = max(0, f - 1); nf <= min(7, f + 1); ++nf) {
-                if (c == WHITE) {
-                    for (int rr = r + 1; rr < 8; ++rr)
-                        if (pos.b[rr * 8 + nf] == makePiece(BLACK, PAWN)) passed = false;
-                } else {
-                    for (int rr = r - 1; rr >= 0; --rr)
-                        if (pos.b[rr * 8 + nf] == makePiece(WHITE, PAWN)) passed = false;
+            for (int ff = f - 1; ff <= f + 1 && passed; ff++) {
+                if (ff < 0 || ff > 7) continue;
+                if (c == WHITE ? maxR[BLACK][ff] > r : minR[WHITE][ff] < r) passed = false;
+            }
+            if (passed) { mg += sgn * PASSED_MG[rel]; eg += sgn * PASSED_EG[rel]; }
+        } else if (t == KNIGHT) {
+            int n = 0;
+            for (int i = 0; i < 8; i++) {
+                int nf = f + KN_DF[i], nr = r + KN_DR[i];
+                if (!inBoard(nf, nr)) continue;
+                int q = pos.b[nr * 8 + nf];
+                if (q == EMPTY || colorOf(q) != c) n++;
+            }
+            mg += sgn * 4 * (n - 4);
+            eg += sgn * 4 * (n - 4);
+        } else if (t == BISHOP || t == ROOK || t == QUEEN) {
+            int d0 = (t == BISHOP) ? 4 : 0, d1 = (t == ROOK) ? 4 : 8, n = 0;
+            for (int d = d0; d < d1; d++) {
+                int nf = f + S_DF[d], nr = r + S_DR[d];
+                while (inBoard(nf, nr)) {
+                    int q = pos.b[nr * 8 + nf];
+                    if (q == EMPTY) n++;
+                    else { if (colorOf(q) != c) n++; break; }
+                    nf += S_DF[d]; nr += S_DR[d];
                 }
             }
-            if (passed) {
-                int advance = c == WHITE ? r - 1 : 6 - r;
-                score += sign * (20 + max(0, advance) * 8);
+            if (t == BISHOP) { mg += sgn * 4 * (n - 6); eg += sgn * 5 * (n - 6); }
+            else if (t == ROOK) {
+                mg += sgn * 2 * (n - 7); eg += sgn * 4 * (n - 7);
+                if (pawnCnt[c][f] == 0) {
+                    int bonus = (pawnCnt[c ^ 1][f] == 0) ? 20 : 9;
+                    mg += sgn * bonus; eg += sgn * bonus / 2;
+                }
+            } else { mg += sgn * (n - 13); eg += sgn * 2 * (n - 13); }
+        }
+    }
+
+    for (int c = 0; c < 2; c++) {
+        int sgn = (c == WHITE) ? 1 : -1;
+        for (int f = 0; f < 8; f++) {
+            int n = pawnCnt[c][f];
+            if (!n) continue;
+            if (n > 1) { mg -= sgn * (n - 1) * 12; eg -= sgn * (n - 1) * 20; }
+            bool isolated = (f == 0 || !pawnCnt[c][f - 1]) && (f == 7 || !pawnCnt[c][f + 1]);
+            if (isolated) { mg -= sgn * n * 10; eg -= sgn * n * 15; }
+        }
+        if (bishops[c] >= 2) { mg += sgn * 30; eg += sgn * 50; }
+        // King shelter (middlegame only): friendly pawns in front of a castled king.
+        int ksq = kingSq[c], kf = fileOf(ksq), kr = rankOf(ksq);
+        if (c == WHITE ? kr <= 1 : kr >= 6) {
+            int dir = (c == WHITE) ? 1 : -1;
+            for (int ff = kf - 1; ff <= kf + 1; ff++) {
+                if (ff < 0 || ff > 7) continue;
+                int r1 = kr + dir, r2 = kr + 2 * dir;
+                if (inBoard(ff, r1) && pos.b[r1 * 8 + ff] == makePiece(c, PAWN)) mg += sgn * 10;
+                else if (inBoard(ff, r2) && pos.b[r2 * 8 + ff] == makePiece(c, PAWN)) mg += sgn * 5;
+                else mg -= sgn * 10;
             }
         }
     }
 
-    // Rooks like open and semi-open files.
-    for (int c = WHITE; c <= BLACK; ++c) {
-        int sign = c == WHITE ? 1 : -1;
-        for (int f = 0; f < 8; ++f) {
-            if (!rooks[c][f]) continue;
-            bool wp = pawns[WHITE][f] != 0, bp = pawns[BLACK][f] != 0;
-            if (!wp && !bp) score += sign * 20 * rooks[c][f];
-            else if ((c == WHITE && !wp) || (c == BLACK && !bp))
-                score += sign * 10 * rooks[c][f];
-        }
-    }
-
-    // Development/central control through legal move counts. This is intentionally
-    // modest because mobility is expensive and should not dominate material.
-    for (int c = WHITE; c <= BLACK; ++c) {
-        Position q = pos;
-        q.side = c;
-        MoveList ml;
-        q.genMoves(ml, false);
-        int legal = 0;
-        for (int i = 0; i < ml.n; ++i) {
-            Position n = q;
-            if (n.make(ml.m[i])) ++legal;
-        }
-        score += (c == WHITE ? 1 : -1) * min(legal, 40) * 2;
-    }
-
-    // King safety: penalize exposed kings in the middlegame; scale down as pieces
-    // disappear so the engine can activate its king in endgames.
-    int totalNonPawns = 0;
-    for (int c = WHITE; c <= BLACK; ++c)
-        for (int t = KNIGHT; t <= QUEEN; ++t) totalNonPawns += pieceCount[c][t];
-    if (totalNonPawns >= 6) {
-        for (int c = WHITE; c <= BLACK; ++c) {
-            if (kingSq[c] < 0) continue;
-            int f = fileOf(kingSq[c]), r = rankOf(kingSq[c]);
-            int danger = 0;
-            for (int df = -1; df <= 1; ++df) for (int dr = -1; dr <= 1; ++dr) {
-                if (!df && !dr) continue;
-                int nf = f + df, nr = r + dr;
-                if (!inBoard(nf, nr)) continue;
-                int sq = nr * 8 + nf;
-                int enemy = c ^ 1;
-                if (pos.attacked(sq, enemy)) danger++;
-            }
-            score += (c == WHITE ? 1 : -1) * (-12 * danger);
-        }
-    }
-
-    // Learned adjustments are deliberately small and additive.
+    if (phase > 24) phase = 24;
+    int score = (mg * phase + eg * (24 - phase)) / 24;
+    // Learned adjustments stay small and additive (white's point of view, like the rest).
     score += (int)llround(machine_learning::score(pos.b, pos.side));
-    return pos.side == WHITE ? score : -score;
+    return (pos.side == WHITE ? score : -score) + 10;  // small bonus for having the move
 }
+
+// ---------------------------------------------------------------- transposition table
+enum { TT_EXACT = 1, TT_LOWER = 2, TT_UPPER = 3 };
+struct TTEntry {
+    uint64_t key = 0;
+    int16_t score = 0;
+    uint16_t move = 0;
+    int8_t depth = 0;
+    uint8_t flag = 0;
+};
+static vector<TTEntry> g_tt;
+static size_t g_ttMask = 0;
+
+static void ttResize(size_t mb) {
+    size_t n = 1;
+    while (n * 2 * sizeof(TTEntry) <= mb * 1024 * 1024) n *= 2;
+    g_tt.assign(n, TTEntry());
+    g_ttMask = n - 1;
+}
+static void ttClear() { fill(g_tt.begin(), g_tt.end(), TTEntry()); }
+static inline TTEntry* ttProbe(uint64_t key) {
+    TTEntry* e = &g_tt[key & g_ttMask];
+    return e->key == key ? e : nullptr;
+}
+static inline uint16_t encMove(const Move& m) { return m.from | (m.to << 6) | (m.promo << 12); }
 
 // ---------------------------------------------------------------- search
 static const int INF = 30000, MATE = 29000, MAXPLY = 64;
 static atomic<bool> g_stop(false);
-
-struct Zobrist {
-    uint64_t piece[64][16]{};
-    uint64_t side = 0;
-    uint64_t castle[16]{};
-    uint64_t ep[64]{};
-    bool ready = false;
-
-    static uint64_t mix(uint64_t x) {
-        x += 0x9e3779b97f4a7c15ULL;
-        x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ULL;
-        x = (x ^ (x >> 27)) * 0x94d049bb133111ebULL;
-        return x ^ (x >> 31);
-    }
-
-    void init() {
-        if (ready) return;
-        uint64_t seed = 0x243f6a8885a308d3ULL;
-        for (int sq = 0; sq < 64; ++sq)
-            for (int p = 0; p < 16; ++p)
-                piece[sq][p] = mix(seed += 0x9e3779b97f4a7c15ULL);
-        side = mix(seed += 0x9e3779b97f4a7c15ULL);
-        for (int i = 0; i < 16; ++i) castle[i] = mix(seed += 0x9e3779b97f4a7c15ULL);
-        for (int i = 0; i < 64; ++i) ep[i] = mix(seed += 0x9e3779b97f4a7c15ULL);
-        ready = true;
-    }
-
-    uint64_t hash(const Position& pos) {
-        init();
-        uint64_t h = 0;
-        for (int sq = 0; sq < 64; ++sq)
-            if (pos.b[sq]) h ^= piece[sq][pos.b[sq]];
-        if (pos.side == BLACK) h ^= side;
-        h ^= castle[pos.castle & 15];
-        if (pos.ep >= 0) h ^= ep[pos.ep];
-        return h;
-    }
-};
-
-static Zobrist Z;
-
-enum TTFlag : uint8_t { TT_EXACT = 0, TT_ALPHA = 1, TT_BETA = 2 };
-
-struct TTEntry {
-    uint64_t key = 0;
-    int score = 0;
-    int depth = -1;
-    uint8_t flag = TT_EXACT;
-    Move best;
-};
-
-class TranspositionTable {
-    vector<TTEntry> table;
-public:
-    explicit TranspositionTable(size_t mb = 32) {
-        size_t bytes = mb * 1024ULL * 1024ULL;
-        size_t n = max<size_t>(1, bytes / sizeof(TTEntry));
-        table.resize(n);
-    }
-
-    void clear() {
-        for (auto& e : table) e = TTEntry{};
-    }
-
-    TTEntry* probe(uint64_t key) {
-        TTEntry& e = table[key % table.size()];
-        return e.key == key ? &e : nullptr;
-    }
-
-    void store(uint64_t key, int depth, int score, uint8_t flag, const Move& best) {
-        TTEntry& e = table[key % table.size()];
-        if (e.key != key || depth >= e.depth) {
-            e.key = key;
-            e.depth = depth;
-            e.score = score;
-            e.flag = flag;
-            e.best = best;
-        }
-    }
-};
-
-
 
 string scoreStr(int s) {
     if (abs(s) > MATE - 100) {
@@ -589,18 +631,23 @@ string scoreStr(int s) {
     return "cp " + to_string(s);
 }
 
+static bool hasPieces(const Position& pos, int c) {
+    for (int sq = 0; sq < 64; sq++) {
+        int p = pos.b[sq];
+        if (p && colorOf(p) == c && typeOf(p) >= KNIGHT && typeOf(p) <= QUEEN) return true;
+    }
+    return false;
+}
+
 struct Searcher {
     chrono::steady_clock::time_point t0;
-    long long limitMs = 1000, nodes = 0;
-    bool timeUp = false;
-    Move rootBest, prevBest;
-    bool havePrev = false;
-    bool hasMove = false;  // false if the position has no legal move
-    TranspositionTable tt;
-    Move killer[MAXPLY][2]{};
-    int history[2][64][64]{};
-
-    Searcher() : tt(16) {}
+    long long limitMs = 1000, softMs = 1LL << 60, nodes = 0;
+    bool timeUp = false, hasMove = false;
+    Move rootBest;
+    uint64_t path[MAXPLY + 8];
+    uint16_t killers[MAXPLY + 8][2];
+    int history[2][64][64];
+    vector<uint64_t> hist;  // keys of the game positions before the root
 
     long long elapsedMs() const {
         return chrono::duration_cast<chrono::milliseconds>(chrono::steady_clock::now() - t0).count();
@@ -609,24 +656,38 @@ struct Searcher {
         if (g_stop.load() || elapsedMs() >= limitMs) timeUp = true;
     }
 
-    // Move ordering: previous best first, then captures (MVV-LVA), then promotions.
-    void scoreMoves(const Position& pos, MoveList& ml, int ply) {
+    bool isRepeat(const Position& pos, int ply) const {
+        int hl = (int)hist.size();
+        for (int i = 4; i <= pos.halfmove; i += 2) {
+            int idx = ply - i;
+            uint64_t k;
+            if (idx >= 0) k = path[idx];
+            else {
+                int h = hl + idx;
+                if (h < 0) break;
+                k = hist[h];
+            }
+            if (k == pos.key) return true;
+        }
+        return false;
+    }
+
+    // Move ordering: hash move, captures (MVV-LVA), promotions, killers, history.
+    void scoreMoves(const Position& pos, MoveList& ml, int ply, uint16_t ttMove, bool root) {
         for (int i = 0; i < ml.n; i++) {
             const Move& m = ml.m[i];
-            int s = 0;
-            if (ply == 0 && havePrev && m == prevBest) s = 1000000;
+            uint16_t e = encMove(m);
+            int s;
+            if (root && hasMove && e == encMove(rootBest)) s = 3000000;
+            else if (ttMove && e == ttMove) s = 2000000;
             else if (m.flags & F_CAPTURE) {
                 int victim = (m.flags & F_EP) ? PAWN : typeOf(pos.b[m.to]);
-                int attacker = typeOf(pos.b[m.from]);
-                s = 100000 + victim * 100 - attacker * 8;
-                if (m.promo) s += 80000;
+                s = 1000000 + victim * 16 - typeOf(pos.b[m.from]) + (m.promo ? 5000 : 0);
             }
-            if (m.promo) s += 90000 + m.promo;
-            if (!(m.flags & F_CAPTURE) && !m.promo) {
-                if (ply < MAXPLY && m == killer[ply][0]) s += 70000;
-                else if (ply < MAXPLY && m == killer[ply][1]) s += 60000;
-                s += history[pos.side][m.from][m.to];
-            }
+            else if (m.promo) s = 900000 + m.promo;
+            else if (e == killers[ply][0]) s = 800000;
+            else if (e == killers[ply][1]) s = 790000;
+            else s = history[pos.side][m.from][m.to];
             ml.score[i] = s;
         }
     }
@@ -642,73 +703,75 @@ struct Searcher {
         if ((++nodes & 2047) == 0) checkTime();
         if (timeUp) return 0;
         if (ply >= MAXPLY) return evaluate(pos);
-
         bool inChk = pos.inCheck(pos.side);
-        MoveList ml;
-        if (inChk) {
-            // In check there is no stand-pat score: every legal check evasion
-            // must be searched, including quiet king moves and interpositions.
-            pos.genMoves(ml, false);
-        } else {
-            int stand = evaluate(pos);
+        int stand = -INF;
+        if (!inChk) {
+            stand = evaluate(pos);
             if (stand >= beta) return beta;
             if (stand > alpha) alpha = stand;
-            pos.genMoves(ml, true);
         }
-
-        scoreMoves(pos, ml, ply);
+        MoveList ml;
+        pos.genMoves(ml, !inChk);
+        scoreMoves(pos, ml, ply, 0, false);
         int legal = 0;
         for (int i = 0; i < ml.n; i++) {
             pick(ml, i);
+            const Move& m = ml.m[i];
+            if (!inChk && !m.promo) {  // delta pruning: this capture can't raise alpha
+                int victim = (m.flags & F_EP) ? PAWN : typeOf(pos.b[m.to]);
+                if (stand + VAL_MG[victim] + 200 < alpha) continue;
+            }
             Position c = pos;
-            if (!c.make(ml.m[i])) continue;
-            ++legal;
+            if (!c.make(m)) continue;
+            legal++;
             int score = -qsearch(c, -beta, -alpha, ply + 1);
             if (timeUp) return 0;
             if (score >= beta) return beta;
             if (score > alpha) alpha = score;
         }
-
         if (inChk && legal == 0) return -MATE + ply;
         return alpha;
     }
 
-    int negamax(const Position& pos, int depth, int alpha, int beta, int ply) {
+    int negamax(const Position& pos, int depth, int alpha, int beta, int ply, bool allowNull) {
         if ((++nodes & 2047) == 0) checkTime();
         if (timeUp) return 0;
-        if (ply > 0 && pos.halfmove >= 100) return 0;
-
+        path[ply] = pos.key;
+        bool pvNode = (beta - alpha > 1);
+        if (ply > 0) {
+            if (pos.halfmove >= 100 || isRepeat(pos, ply)) return 0;
+            alpha = max(alpha, -MATE + ply);  // mate distance pruning
+            beta = min(beta, MATE - ply - 1);
+            if (alpha >= beta) return alpha;
+        }
         bool inChk = pos.inCheck(pos.side);
-        if (inChk && ply < MAXPLY) depth++;
+        if (inChk && ply < MAXPLY - 1) depth++;  // check extension
         if (depth <= 0) return qsearch(pos, alpha, beta, ply);
+        if (ply >= MAXPLY - 1) return evaluate(pos);
 
-        const uint64_t key = Z.hash(pos);
-        const int originalAlpha = alpha;
-        const int originalBeta = beta;
-        TTEntry* hit = tt.probe(key);
-        if (hit && hit->depth >= depth) {
-            if (hit->flag == TT_EXACT) return hit->score;
-            if (hit->flag == TT_ALPHA) alpha = max(alpha, hit->score);
-            else if (hit->flag == TT_BETA) beta = min(beta, hit->score);
-            if (alpha >= beta) return hit->score;
+        uint16_t ttMove = 0;
+        if (TTEntry* e = ttProbe(pos.key)) {
+            ttMove = e->move;
+            if (ply > 0 && e->depth >= depth && !pvNode) {
+                int s = e->score;
+                if (s > MATE - 100) s -= ply;
+                else if (s < -MATE + 100) s += ply;
+                if (e->flag == TT_EXACT) return s;
+                if (e->flag == TT_LOWER && s >= beta) return beta;
+                if (e->flag == TT_UPPER && s <= alpha) return alpha;
+            }
         }
 
-        // Null-move pruning: skip a turn in positions where we have enough
-        // material and are not in check. Never use it near the horizon.
-        if (!inChk && depth >= 3 && beta < MATE - 100) {
-            int nonPawn = 0;
-            for (int sq = 0; sq < 64; ++sq) {
-                int p = pos.b[sq];
-                if (p && colorOf(p) == pos.side && typeOf(p) >= KNIGHT && typeOf(p) <= QUEEN)
-                    nonPawn += VALUE[typeOf(p)];
-            }
-            if (nonPawn >= 500) {
-                Position n = pos;
-                n.side ^= 1;
-                n.ep = -1;
-                n.halfmove++;
-                int reduction = 2 + depth / 4;
-                int score = -negamax(n, depth - 1 - reduction, -beta, -beta + 1, ply + 1);
+        int staticEval = inChk ? -INF : evaluate(pos);
+        if (!pvNode && !inChk && abs(beta) < MATE - 100) {
+            // reverse futility: so far ahead that a shallow search won't change the verdict
+            if (depth <= 3 && staticEval - 120 * depth >= beta) return beta;
+            // null move: if passing still beats beta, a real move will too
+            if (allowNull && depth >= 3 && staticEval >= beta && hasPieces(pos, pos.side)) {
+                Position c = pos;
+                c.makeNull();
+                int R = 2 + depth / 4;
+                int score = -negamax(c, depth - 1 - R, -beta, -beta + 1, ply + 1, false);
                 if (timeUp) return 0;
                 if (score >= beta) return beta;
             }
@@ -716,72 +779,120 @@ struct Searcher {
 
         MoveList ml;
         pos.genMoves(ml, false);
-        scoreMoves(pos, ml, ply);
-        if (hit) {
-            for (int i = 0; i < ml.n; ++i) {
-                if (ml.m[i] == hit->best) {
-                    ml.score[i] += 800000;
-                    break;
-                }
-            }
-        }
-
-        int legal = 0;
-        int moveIndex = 0;
-        Move bestMove;
-        for (int i = 0; i < ml.n; ++i) {
+        scoreMoves(pos, ml, ply, ttMove, ply == 0);
+        int alpha0 = alpha, legal = 0;
+        uint16_t bestMove = 0;
+        Move quietsTried[64];
+        int nQuiets = 0;
+        for (int i = 0; i < ml.n; i++) {
             pick(ml, i);
+            const Move m = ml.m[i];
             Position c = pos;
-            if (!c.make(ml.m[i])) continue;
-            ++legal;
+            if (!c.make(m)) continue;
+            legal++;
+            bool quiet = !(m.flags & F_CAPTURE) && !m.promo;
+            bool givesCheck = false;
+            if (quiet && legal > 1 && !inChk) givesCheck = c.inCheck(c.side);
 
-            int score;
-            bool quiet = !(ml.m[i].flags & F_CAPTURE) && !ml.m[i].promo;
-            if (moveIndex >= 4 && depth >= 3 && quiet && !inChk) {
-                int reduction = 1 + (moveIndex >= 10) + (depth >= 6);
-                score = -negamax(c, depth - 1 - reduction, -alpha - 1, -alpha, ply + 1);
-                if (score > alpha)
-                    score = -negamax(c, depth - 1, -beta, -alpha, ply + 1);
+            // futility pruning: quiet moves near the leaves that can't reach alpha
+            if (!pvNode && !inChk && quiet && !givesCheck && legal > 1 && depth <= 2 &&
+                abs(alpha) < MATE - 100 && staticEval + 150 * depth <= alpha)
+                continue;
+
+            int newDepth = depth - 1, score;
+            if (legal == 1) {
+                score = -negamax(c, newDepth, -beta, -alpha, ply + 1, true);
             } else {
-                score = -negamax(c, depth - 1, -beta, -alpha, ply + 1);
+                int red = 0;  // late move reduction
+                if (depth >= 3 && quiet && !inChk && !givesCheck && legal > 3) {
+                    red = 1 + (legal > 8) + (depth > 7);
+                    if (red > newDepth - 1) red = max(0, newDepth - 1);
+                }
+                score = -negamax(c, newDepth - red, -alpha - 1, -alpha, ply + 1, true);
+                if (score > alpha && red > 0)
+                    score = -negamax(c, newDepth, -alpha - 1, -alpha, ply + 1, true);
+                if (score > alpha && score < beta)
+                    score = -negamax(c, newDepth, -beta, -alpha, ply + 1, true);
             }
             if (timeUp) return 0;
-            ++moveIndex;
 
+            if (score >= beta) {
+                if (ply == 0) rootBest = m;
+                if (quiet) {
+                    uint16_t e = encMove(m);
+                    if (killers[ply][0] != e) { killers[ply][1] = killers[ply][0]; killers[ply][0] = e; }
+                    int bonus = depth * depth;
+                    int& h = history[pos.side][m.from][m.to];
+                    h = min(h + bonus, 400000);
+                    for (int q = 0; q < nQuiets; q++) {   // punish quiets that failed to cut
+                        int& hq = history[pos.side][quietsTried[q].from][quietsTried[q].to];
+                        hq = max(hq - bonus, 0);
+                    }
+                }
+                ttStore(pos.key, TT_LOWER, beta, depth, encMove(m), ply);
+                return beta;
+            }
             if (score > alpha) {
                 alpha = score;
-                bestMove = ml.m[i];
-                if (ply == 0) rootBest = ml.m[i];
-                if (alpha >= beta) {
-                    if (quiet && ply < MAXPLY) {
-                        if (!(ml.m[i] == killer[ply][0])) {
-                            killer[ply][1] = killer[ply][0];
-                            killer[ply][0] = ml.m[i];
-                        }
-                        int& h = history[pos.side][ml.m[i].from][ml.m[i].to];
-                        h = min(20000, h + depth * depth);
-                    }
-                    break;
-                }
+                bestMove = encMove(m);
+                if (ply == 0) rootBest = m;
             }
+            if (quiet && nQuiets < 64) quietsTried[nQuiets++] = m;
         }
-        if (legal == 0) return inChk ? -MATE + ply : 0;
-
-        uint8_t flag = TT_EXACT;
-        if (alpha <= originalAlpha) flag = TT_ALPHA;
-        else if (alpha >= originalBeta) flag = TT_BETA;
-        tt.store(key, depth, alpha, flag, bestMove);
+        if (legal == 0) return inChk ? -MATE + ply : 0;  // checkmate or stalemate
+        ttStore(pos.key, alpha > alpha0 ? TT_EXACT : TT_UPPER, alpha, depth, bestMove, ply);
         return alpha;
     }
 
-    Move run(const Position& root, long long limit, int maxDepth, bool verbose = true) {
+    void ttStore(uint64_t key, int flag, int score, int depth, uint16_t move, int ply) {
+        TTEntry* e = &g_tt[key & g_ttMask];
+        if (e->key == key && e->depth > depth && flag != TT_EXACT) return;  // keep the deeper entry
+        if (score > MATE - 100) score += ply;
+        else if (score < -MATE + 100) score -= ply;
+        e->key = key;
+        e->score = (int16_t)score;
+        e->depth = (int8_t)depth;
+        e->flag = (uint8_t)flag;
+        if (move || e->key != key) e->move = move;
+    }
+
+    // Principal variation: the root move, then whatever the hash table remembers.
+    string pvString(Position pos, const Move& first, int maxLen) {
+        string s = moveToStr(first);
+        pos.make(first);
+        vector<uint64_t> seen;
+        for (int i = 1; i < maxLen; i++) {
+            TTEntry* e = ttProbe(pos.key);
+            if (!e || !e->move) break;
+            if (find(seen.begin(), seen.end(), pos.key) != seen.end()) break;
+            seen.push_back(pos.key);
+            MoveList ml;
+            pos.genMoves(ml, false);
+            bool found = false;
+            for (int j = 0; j < ml.n && !found; j++) {
+                if (encMove(ml.m[j]) != e->move) continue;
+                Position c = pos;
+                if (!c.make(ml.m[j])) continue;
+                s += " " + moveToStr(ml.m[j]);
+                pos = c;
+                found = true;
+            }
+            if (!found) break;
+        }
+        return s;
+    }
+
+    Move run(const Position& root, long long limit, int maxDepth, bool verbose = true,
+             const vector<uint64_t>* history_ = nullptr) {
+        if (g_tt.empty()) ttResize(16);
         limitMs = limit;
+        softMs = limit < (1LL << 50) ? limit * 6 / 10 : (1LL << 60);
         t0 = chrono::steady_clock::now();
-        Z.init();
-        // Keep TT entries across iterative-deepening iterations so the
-        // previous depth provides ordering and bounds to the next depth.
         nodes = 0;
         timeUp = false;
+        hist = history_ ? *history_ : vector<uint64_t>();
+        memset(killers, 0, sizeof(killers));
+        memset(history, 0, sizeof(history));
         MoveList ml;
         root.genMoves(ml, false);
         Move best;
@@ -790,20 +901,32 @@ struct Searcher {
             Position c = root;
             if (c.make(ml.m[i])) { best = ml.m[i]; any = true; }
         }
-        if (!any) { hasMove = false; return best; }
+        hasMove = false;
+        if (!any) return best;
+        rootBest = best;
         hasMove = true;
-        prevBest = best;
-        havePrev = true;
+        int score = 0;
         for (int d = 1; d <= maxDepth; d++) {
-            int score = negamax(root, d, -INF, INF, 0);
+            int alpha = -INF, beta = INF, delta = 40;
+            if (d >= 5) { alpha = max(-INF, score - delta); beta = min(INF, score + delta); }
+            int s;
+            while (true) {   // aspiration window: widen and retry when the score falls outside
+                s = negamax(root, d, alpha, beta, 0, true);
+                if (timeUp) break;
+                if (s <= alpha && alpha > -INF) { alpha = max(-INF, alpha - delta); delta *= 2; if (delta > 400) alpha = -INF; continue; }
+                if (s >= beta && beta < INF) { beta = min(INF, beta + delta); delta *= 2; if (delta > 400) beta = INF; continue; }
+                break;
+            }
             if (timeUp) break;
+            score = s;
             best = rootBest;
-            prevBest = best;
             long long ms = elapsedMs();
-            if (verbose) cout << "info depth " << d << " score " << scoreStr(score) << " nodes " << nodes
-                 << " time " << ms << " nps " << (ms > 0 ? nodes * 1000 / ms : nodes)
-                 << " pv " << moveToStr(best) << endl;
+            if (verbose)
+                cout << "info depth " << d << " score " << scoreStr(score) << " nodes " << nodes
+                     << " time " << ms << " nps " << (ms > 0 ? nodes * 1000 / ms : nodes)
+                     << " pv " << pvString(root, best, d) << endl;
             if (MATE - abs(score) <= d) break;  // forced mate found
+            if (ms >= softMs) break;            // not enough time left for another iteration
         }
         return best;
     }
@@ -823,6 +946,25 @@ uint64_t perft(const Position& pos, int depth) {
     return n;
 }
 
+// Walks every line to `depth`, checking that the incrementally updated hash key
+// matches a from-scratch recomputation. Returns the number of mismatches.
+uint64_t keyCheck(const Position& pos, int depth) {
+    if (depth == 0) return 0;
+    uint64_t bad = 0;
+    MoveList ml;
+    pos.genMoves(ml, false);
+    Position nm = pos;
+    nm.makeNull();
+    if (nm.key != nm.computeKey()) bad++;
+    for (int i = 0; i < ml.n; i++) {
+        Position c = pos;
+        if (!c.make(ml.m[i])) continue;
+        if (c.key != c.computeKey()) bad++;
+        bad += keyCheck(c, depth - 1);
+    }
+    return bad;
+}
+
 // ---------------------------------------------------------------- UCI loop
 // Define NO_MAIN to reuse everything above from another front end (see wasm_api.cpp).
 #ifndef NO_MAIN
@@ -836,20 +978,33 @@ static void stopSearch() {
 int main() {
     Position pos;
     pos.setFEN(START_FEN);
+    vector<uint64_t> gameKeys;  // hash keys of the positions played before the current one
+    ttResize(16);
     string line;
     while (getline(cin, line)) {
         istringstream ss(line);
         string cmd;
         ss >> cmd;
         if (cmd == "uci") {
-            cout << "id name Malingnant-Bot\nid author Overseardot\nuciok" << endl;
+            cout << "id name Malingnant-Bot\nid author Overseardot\n"
+                    "option name Hash type spin default 16 min 1 max 2048\nuciok" << endl;
         } else if (cmd == "isready") {
             cout << "readyok" << endl;
+        } else if (cmd == "setoption") {
+            stopSearch();
+            string tok, name, value;
+            ss >> tok;  // "name"
+            while (ss >> tok && tok != "value") name += (name.empty() ? "" : " ") + tok;
+            while (ss >> tok) value += (value.empty() ? "" : " ") + tok;
+            if (name == "Hash") ttResize((size_t)max(1, min(2048, atoi(value.c_str()))));
         } else if (cmd == "ucinewgame") {
             stopSearch();
             pos.setFEN(START_FEN);
+            gameKeys.clear();
+            ttClear();
         } else if (cmd == "position") {
             stopSearch();
+            gameKeys.clear();
             string tok;
             ss >> tok;
             if (tok == "startpos") { pos.setFEN(START_FEN); ss >> tok; }
@@ -862,7 +1017,7 @@ int main() {
                 string mv;
                 while (ss >> mv) {
                     Move m;
-                    if (parseMove(pos, mv, m)) pos.make(m);
+                    if (parseMove(pos, mv, m)) { gameKeys.push_back(pos.key); pos.make(m); }
                 }
             }
         } else if (cmd == "go") {
@@ -878,6 +1033,12 @@ int main() {
                 else if (tok == "movetime") ss >> movetime;
                 else if (tok == "movestogo") ss >> movestogo;
                 else if (tok == "depth") ss >> depth;
+                else if (tok == "keycheck") {
+                    int d = 1;
+                    ss >> d;
+                    cout << "key mismatches " << keyCheck(pos, d) << endl;
+                    goto next;
+                }
                 else if (tok == "perft") {
                     int d = 1;
                     ss >> d;
@@ -911,9 +1072,10 @@ int main() {
                 }
                 g_stop = false;
                 Position copy = pos;
-                g_thread = thread([copy, limit, maxDepth]() {
-                    Searcher s;
-                    Move m = s.run(copy, limit, maxDepth);
+                vector<uint64_t> keys = gameKeys;
+                g_thread = thread([copy, limit, maxDepth, keys]() {
+                    static Searcher s;   // big (history tables), so keep it off the thread stack
+                    Move m = s.run(copy, limit, maxDepth, true, &keys);
                     cout << "bestmove " << (s.hasMove ? moveToStr(m) : string("0000")) << endl;
                 });
             }
