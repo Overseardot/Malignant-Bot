@@ -603,6 +603,7 @@
         let selected = null;
         let validMoves = [];
         let history = [];
+        let moveHistoryUci = [];
         let capturedWhite = [];
         let capturedBlack = [];
         let isFlipped = false;
@@ -874,11 +875,13 @@
         }
 
         function resetGame() {
+            engineCall('engine_new_game', null, [], []);
             engineFen = START_FEN;
             syncBoardFromEngine();
             selected = null;
             validMoves = [];
             history = [];
+            moveHistoryUci = [];
             capturedWhite = [];
             capturedBlack = [];
             renderBoard();
