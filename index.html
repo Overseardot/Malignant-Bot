@@ -1,13 +1,12 @@
 <!DOCTYPE html>
 <html lang="en" class="h-full bg-black text-white antialiased selection:bg-red-600 selection:text-black">
 <head>
-    <script src="engine.js"></script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MALIGNANT COGNITION - High Contrast Red/Black/White Chess Engine</title>
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Google Fonts: UnifrakturMaguntia for Gothic branding, JetBrains Mono for metrics, Syne for aggressive headers -->
+    <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,500;0,800;1,400&family=Syne:wght@700;800&family=UnifrakturMaguntia&display=swap" rel="stylesheet">
@@ -31,11 +30,6 @@
                             dark: '#880011',
                             glow: '#ff1a40',
                         }
-                    },
-                    boxShadow: {
-                        'red-strobe': '0 0 20px #ff0033, inset 0 0 10px #ff0033',
-                        'stark-border': '0 0 0 1px #ffffff',
-                        'red-border': '0 0 0 1px #ff0033',
                     }
                 }
             }
@@ -47,48 +41,46 @@
             background-color: #000000;
             color: #ffffff;
             background-image: 
-                radial-gradient(circle at 50% 10%, rgba(255, 0, 51, 0.12) 0%, transparent 70%),
-                linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
-                linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
-            background-size: 100% 100%, 30px 30px, 30px 30px;
+                radial-gradient(circle at 50% 10%, rgba(255, 0, 51, 0.15) 0%, transparent 75%),
+                linear-gradient(to right, rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+            background-size: 100% 100%, 28px 28px, 28px 28px;
         }
 
-        /* High Contrast Board Styling */
+        /* High Contrast Board Squares */
         .tile-dark {
-            background-color: #0d0003;
-            border: 1px solid #220006;
+            background-color: #2e040c;
+            border: 1px solid #4a0815;
         }
         .tile-light {
-            background-color: #1a1a1a;
-            border: 1px solid #333333;
+            background-color: #0d0d11;
+            border: 1px solid #22222a;
         }
         .tile-selected {
             background-color: #ff0033 !important;
-            box-shadow: inset 0 0 15px #000000;
+            box-shadow: inset 0 0 20px #000000;
         }
-        .tile-selected svg path {
-            fill: #ffffff !important;
-            stroke: #000000 !important;
+        .tile-selected svg {
+            filter: drop-shadow(0 0 10px #ffffff) !important;
         }
         .tile-possible-move::after {
             content: '';
-            width: 30%;
-            height: 30%;
+            width: 28%;
+            height: 28%;
             background: #ff0033;
             border-radius: 50%;
-            box-shadow: 0 0 10px #ff0033;
+            box-shadow: 0 0 12px #ff0033, 0 0 4px #ffffff;
         }
         .tile-possible-capture {
             background-color: #880011 !important;
-            box-shadow: inset 0 0 12px #ff0033;
+            box-shadow: inset 0 0 16px #ff0033;
         }
 
-        /* Brutalist Card Frame */
+        /* Brutalist Frame Styling */
         .brutalist-card {
             background: #050505;
             border: 1px solid #ff0033;
             box-shadow: 4px 4px 0px #ff0033;
-            position: relative;
         }
         .brutalist-card-white {
             background: #050505;
@@ -96,7 +88,7 @@
             box-shadow: 4px 4px 0px #ffffff;
         }
 
-        /* Scanline FX */
+        /* Scanline Overlay */
         .scanline {
             position: fixed;
             top: 0; left: 0; width: 100%; height: 100%;
@@ -104,10 +96,10 @@
             background-size: 100% 4px;
             pointer-events: none;
             z-index: 50;
-            opacity: 0.6;
+            opacity: 0.5;
         }
 
-        /* Custom Scrollbar */
+        /* Custom Scrollbars */
         ::-webkit-scrollbar {
             width: 4px;
         }
@@ -118,16 +110,25 @@
             background: #ff0033;
         }
 
+        /* Piece Hover & Distinction Effects */
         .chess-piece {
             cursor: grab;
-            filter: drop-shadow(0 2px 4px rgba(0,0,0,0.9));
-            transition: transform 0.1s ease;
+            transition: transform 0.15 ease, filter 0.15s ease;
+            user-select: none;
         }
         .chess-piece:hover {
-            transform: scale(1.1);
+            transform: scale(1.15) translateY(-2px);
+            z-index: 20;
         }
         .chess-piece:active {
             cursor: grabbing;
+        }
+
+        .piece-white-glow {
+            filter: drop-shadow(0 0 6px rgba(255, 255, 255, 0.85)) drop-shadow(0 2px 4px rgba(0,0,0,0.9));
+        }
+        .piece-black-glow {
+            filter: drop-shadow(0 0 8px rgba(255, 0, 51, 0.95)) drop-shadow(0 2px 4px rgba(0,0,0,0.9));
         }
     </style>
 </head>
@@ -135,11 +136,10 @@
 
     <div class="scanline"></div>
 
-    <!-- TOP HEADER -->
     <header class="border-b-2 border-red-600 bg-black px-4 py-3 sticky top-0 z-40">
         <div class="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
             
-            <!-- Logo & Version -->
+            <!-- Logo & Title -->
             <div class="flex items-center gap-3">
                 <div class="w-10 h-10 bg-red-600 text-black font-gothic text-3xl flex items-center justify-center font-bold border-2 border-white shadow-[2px_2px_0px_#ffffff]">
                     †
@@ -147,21 +147,21 @@
                 <div>
                     <h1 class="font-syne text-xl md:text-2xl font-extrabold tracking-widest text-white flex items-center gap-2">
                         MALIGNANT COGNITION
-                        <span class="text-[10px] font-mono text-black bg-red-600 px-2 py-0.5 font-bold border border-white">v4.0.9 SOUL CORE</span>
+                        <span class="text-[10px] font-mono text-black bg-red-600 px-2 py-0.5 font-bold border border-white">v5.0 ICONIC CORE</span>
                     </h1>
                     <p class="text-[10px] font-mono text-red-500 uppercase tracking-widest">ADAPTIVE HIGH-CONTRAST CHESS ENGINE</p>
                 </div>
             </div>
 
-            <!-- Global Metrics Pill -->
+            <!-- Global Stats & Sound Control -->
             <div class="flex items-center gap-4 text-xs">
                 <div class="flex items-center gap-3 px-3 py-1.5 border border-red-600 bg-black shadow-[2px_2px_0px_#ff0033]">
                     <span class="text-white font-bold">SYNAPSE NODES:</span>
                     <span class="text-red-500 font-extrabold font-mono" id="nodeCounter">1,048,576</span>
                 </div>
                 <div class="hidden sm:flex items-center gap-3 px-3 py-1.5 border border-white bg-black shadow-[2px_2px_0px_#ffffff]">
-                    <span class="text-gray-400">WIN RATE:</span>
-                    <span class="text-white font-bold" id="winRateVal">94.8%</span>
+                    <span class="text-gray-400">EVALUATION:</span>
+                    <span class="text-white font-bold" id="evalVal">0.00</span>
                 </div>
                 <button onclick="toggleSound()" class="px-3 py-1.5 border border-red-600 bg-red-600 text-black font-bold hover:bg-white hover:text-black transition flex items-center gap-2">
                     <i class="fa-solid fa-volume-high" id="soundIcon"></i>
@@ -174,7 +174,7 @@
         <!-- SANITY METER / EVALUATION BAR -->
         <div class="max-w-7xl mx-auto mt-3">
             <div class="flex justify-between items-center text-[11px] font-bold mb-1">
-                <span class="text-white flex items-center gap-1"><i class="fa-solid fa-user text-red-500"></i> MORTAL (WHITE)</span>
+                <span class="text-white flex items-center gap-1"><i class="fa-solid fa-user text-red-500"></i> MORTAL PLAYER (WHITE)</span>
                 <span id="sanityScoreText" class="text-red-500 font-extrabold uppercase">SANITY BALANCED [+0.0]</span>
                 <span class="text-red-500 flex items-center gap-1">MALIGNANT BOT (BLACK) <i class="fa-solid fa-skull"></i></span>
             </div>
@@ -186,25 +186,24 @@
         </div>
     </header>
 
-    <!-- MAIN GRID CONTAINER -->
     <main class="flex-1 max-w-7xl w-full mx-auto p-4 grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
 
-        <!-- LEFT PANEL: NEURAL ADAPTATION CORE (3 Cols) -->
+        <!-- LEFT PANEL: NEURAL CORE & METRICS (3 Cols) -->
         <section class="lg:col-span-3 space-y-6">
             
-            <!-- Live Neural Synapse Heatmap Animation -->
+            <!-- Live Neural Canvas -->
             <div class="brutalist-card p-4">
                 <h2 class="text-xs font-bold text-red-500 uppercase tracking-widest mb-3 flex items-center justify-between border-b border-red-600 pb-2">
                     <span><i class="fa-solid fa-network-wired"></i> SYNAPSE MATRIX</span>
                     <span class="text-[9px] bg-red-600 text-black px-1 font-bold animate-pulse">LIVE</span>
                 </h2>
-                <div class="w-full h-28 bg-black border border-red-600 relative overflow-hidden flex items-center justify-center">
+                <div class="w-full h-32 bg-black border border-red-600 relative overflow-hidden flex items-center justify-center">
                     <canvas id="synapseCanvas" class="w-full h-full"></canvas>
                 </div>
             </div>
 
             <!-- Neural Metrics -->
-            <div class="brutalist-card p-4 space-y-4">
+            <div class="brutalist-card-white p-4 space-y-4">
                 <h2 class="text-xs font-bold text-white uppercase tracking-widest border-b border-white pb-2 flex items-center justify-between">
                     <span><i class="fa-solid fa-brain"></i> NEURAL METRICS</span>
                     <i class="fa-solid fa-microchip text-red-500"></i>
@@ -244,70 +243,57 @@
                 </div>
             </div>
 
-            <!-- Personality Matrix Selector -->
-            <div class="brutalist-card-white p-4">
-                <h2 class="text-xs font-bold text-white uppercase tracking-widest mb-3 border-b border-white pb-2">
-                    <i class="fa-solid fa-masks-theater text-red-500"></i> BOT PERSONALITY MATRIX
+            <!-- Piece Legend for Instant Recognition -->
+            <div class="brutalist-card p-4 text-xs space-y-2">
+                <h2 class="text-xs font-bold text-red-500 uppercase tracking-widest border-b border-red-600 pb-2">
+                    <i class="fa-solid fa-shield-halved"></i> PIECE DISTINCTION
                 </h2>
-                <div class="space-y-2 text-xs" id="personalitySelector">
-                    <button onclick="setPersonality('novice')" data-mode="novice" class="personality-btn w-full text-left p-2 border border-gray-700 bg-black hover:border-white transition flex items-center justify-between">
-                        <div>
-                            <div class="text-white font-bold">Hungering Novice</div>
-                            <div class="text-[9px] text-gray-500">IMPULSIVE / RECKLESS</div>
-                        </div>
-                        <span class="text-red-500">†</span>
-                    </button>
-                    <button onclick="setPersonality('executioner')" data-mode="executioner" class="personality-btn w-full text-left p-2 border border-red-600 bg-red-600/10 hover:border-red-500 transition flex items-center justify-between ring-1 ring-red-600">
-                        <div>
-                            <div class="text-red-500 font-bold">Calculated Executioner</div>
-                            <div class="text-[9px] text-red-400">TACTICAL / MATERIALIST</div>
-                        </div>
-                        <span class="text-white">‡</span>
-                    </button>
-                    <button onclick="setPersonality('void')" data-mode="void" class="personality-btn w-full text-left p-2 border border-white bg-black hover:border-red-600 transition flex items-center justify-between">
-                        <div>
-                            <div class="text-white font-bold">Void Master</div>
-                            <div class="text-[9px] text-gray-400">DEEP POSITIONAL TRAPS</div>
-                        </div>
-                        <span class="text-red-500">†</span>
-                    </button>
+                <div class="grid grid-cols-2 gap-2 text-[10px]">
+                    <div class="flex items-center gap-2 border border-gray-800 p-1 bg-black">
+                        <div class="w-4 h-4 bg-white rounded-full flex items-center justify-center text-black font-bold text-[8px]">W</div>
+                        <span class="text-white">Mortal (Stark White)</span>
+                    </div>
+                    <div class="flex items-center gap-2 border border-red-900 p-1 bg-black">
+                        <div class="w-4 h-4 bg-red-600 rounded-full flex items-center justify-center text-black font-bold text-[8px]">B</div>
+                        <span class="text-red-500">Engine (Crimson Red)</span>
+                    </div>
                 </div>
             </div>
 
         </section>
 
-        <!-- CENTER PANEL: THE VOID BOARD (6 Cols) -->
+        <!-- CENTER PANEL: THE VOID CHESS BOARD (6 Cols) -->
         <section class="lg:col-span-6 flex flex-col items-center space-y-4">
 
             <!-- Interactive Board Container -->
             <div class="w-full max-w-[540px] aspect-square brutalist-card p-3 flex flex-col justify-center items-center">
                 
                 <div class="w-full h-full border-2 border-white p-1 bg-black">
-                    <!-- Grid rendered by JS -->
+                    <!-- Chess Grid -->
                     <div id="chessboard" class="grid grid-cols-8 grid-rows-8 w-full h-full select-none"></div>
                 </div>
 
             </div>
 
-            <!-- Action Buttons Bar -->
+            <!-- Action Controls -->
             <div class="w-full max-w-[540px] grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-bold">
-                <button onclick="flipBoard()" class="p-2 border border-white bg-black text-white hover:bg-white hover:text-black transition text-center shadow-[2px_2px_0px_#ffffff]">
-                    <i class="fa-solid fa-rotate"></i> FLIP
+                <button onclick="flipBoard()" class="p-2.5 border border-white bg-black text-white hover:bg-white hover:text-black transition text-center shadow-[2px_2px_0px_#ffffff]">
+                    <i class="fa-solid fa-rotate"></i> FLIP BOARD
                 </button>
-                <button onclick="forceMutation()" class="p-2 border border-red-600 bg-black text-red-500 hover:bg-red-600 hover:text-black transition text-center shadow-[2px_2px_0px_#ff0033]">
-                    <i class="fa-solid fa-bolt"></i> MUTATE
+                <button onclick="forceMutation()" class="p-2.5 border border-red-600 bg-black text-red-500 hover:bg-red-600 hover:text-black transition text-center shadow-[2px_2px_0px_#ff0033]">
+                    <i class="fa-solid fa-bolt"></i> MUTATE CORE
                 </button>
-                <button onclick="toggleAutoPlay()" id="autoPlayBtn" class="p-2 border border-red-600 bg-red-600 text-black hover:bg-white hover:text-black transition text-center shadow-[2px_2px_0px_#ffffff]">
+                <button onclick="toggleAutoPlay()" id="autoPlayBtn" class="p-2.5 border border-red-600 bg-red-600 text-black hover:bg-white hover:text-black transition text-center shadow-[2px_2px_0px_#ffffff]">
                     <i class="fa-solid fa-robot"></i> AUTO BOT
                 </button>
-                <button onclick="resetGame()" class="p-2 border border-white bg-black text-white hover:bg-red-600 hover:text-black transition text-center shadow-[2px_2px_0px_#ffffff]">
-                    <i class="fa-solid fa-trash"></i> PURGE
+                <button onclick="resetGame()" class="p-2.5 border border-white bg-black text-white hover:bg-red-600 hover:text-black transition text-center shadow-[2px_2px_0px_#ffffff]">
+                    <i class="fa-solid fa-trash"></i> PURGE MATCH
                 </button>
             </div>
 
         </section>
 
-        <!-- RIGHT PANEL: SOUL ENGINE FEED & MOVE LEDGER (3 Cols) -->
+        <!-- RIGHT PANEL: THOUGHT LOG & MOVE CHRONICLE (3 Cols) -->
         <section class="lg:col-span-3 space-y-6">
             
             <!-- Realtime Thought Log -->
@@ -317,11 +303,11 @@
                     <i class="fa-solid fa-eye text-white"></i>
                 </h2>
                 <div id="thoughtLog" class="flex-1 overflow-y-auto space-y-2 text-[11px] font-mono pr-1">
-                    <div class="text-gray-500">[00:00:00] Cognitive core online. Awaiting first move...</div>
+                    <div class="text-gray-500">[00:00:00] Cognitive core online. Awaiting mortal move...</div>
                 </div>
             </div>
 
-            <!-- Move Ledger -->
+            <!-- Move Chronicle Ledger -->
             <div class="brutalist-card-white p-4 flex flex-col h-[280px]">
                 <h2 class="text-xs font-bold text-white uppercase tracking-widest mb-3 border-b border-white pb-2 flex items-center justify-between">
                     <span><i class="fa-solid fa-book text-red-500"></i> MOVE CHRONICLE</span>
@@ -342,15 +328,15 @@
                     </table>
                 </div>
 
-                <!-- Captured Material Counter -->
+                <!-- Vanquished Material Display -->
                 <div class="pt-2 border-t border-gray-800 mt-2 text-[10px] space-y-1">
                     <div class="flex justify-between items-center">
                         <span class="text-gray-400">VANQUISHED WHITE:</span>
-                        <div id="capturedWhiteContainer" class="flex gap-0.5 text-white"></div>
+                        <div id="capturedWhiteContainer" class="flex gap-1 text-white font-bold"></div>
                     </div>
                     <div class="flex justify-between items-center">
                         <span class="text-gray-400">DEVOURING RED:</span>
-                        <div id="capturedBlackContainer" class="flex gap-0.5 text-red-500"></div>
+                        <div id="capturedBlackContainer" class="flex gap-1 text-red-500 font-bold"></div>
                     </div>
                 </div>
             </div>
@@ -361,7 +347,7 @@
 
     <script>
         /* ===================================================================
-           1. AUDIO SYNTHESIZER (WEB AUDIO API - STARK RED & BLACK THEME)
+           1. AUDIO SYNTHESIZER
            =================================================================== */
         let audioCtx = null;
         let soundOn = true;
@@ -384,28 +370,28 @@
 
                 if (type === 'move') {
                     osc.type = 'square';
-                    osc.frequency.setValueAtTime(180, now);
-                    osc.frequency.exponentialRampToValueAtTime(60, now + 0.06);
+                    osc.frequency.setValueAtTime(220, now);
+                    osc.frequency.exponentialRampToValueAtTime(70, now + 0.08);
                     gain.gain.setValueAtTime(0.3, now);
-                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.06);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.08);
                     osc.start(now);
-                    osc.stop(now + 0.06);
+                    osc.stop(now + 0.08);
                 } else if (type === 'capture') {
                     osc.type = 'sawtooth';
-                    osc.frequency.setValueAtTime(350, now);
-                    osc.frequency.exponentialRampToValueAtTime(40, now + 0.18);
+                    osc.frequency.setValueAtTime(400, now);
+                    osc.frequency.exponentialRampToValueAtTime(50, now + 0.2);
                     gain.gain.setValueAtTime(0.5, now);
-                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.18);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
                     osc.start(now);
-                    osc.stop(now + 0.18);
+                    osc.stop(now + 0.2);
                 } else if (type === 'mutate') {
                     osc.type = 'sine';
-                    osc.frequency.setValueAtTime(200, now);
-                    osc.frequency.exponentialRampToValueAtTime(800, now + 0.25);
-                    gain.gain.setValueAtTime(0.2, now);
-                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.25);
+                    osc.frequency.setValueAtTime(150, now);
+                    osc.frequency.exponentialRampToValueAtTime(900, now + 0.3);
+                    gain.gain.setValueAtTime(0.25, now);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
                     osc.start(now);
-                    osc.stop(now + 0.25);
+                    osc.stop(now + 0.3);
                 }
             } catch (e) {}
         }
@@ -417,7 +403,7 @@
         }
 
         /* ===================================================================
-           2. SYNAPSE CANVAS MATRIX ANIMATION
+           2. SYNAPSE MATRIX CANVAS ANIMATION
            =================================================================== */
         function initSynapseCanvas() {
             const canvas = document.getElementById('synapseCanvas');
@@ -425,11 +411,11 @@
             canvas.width = canvas.parentElement.clientWidth;
             canvas.height = canvas.parentElement.clientHeight;
 
-            const nodes = Array.from({ length: 18 }, () => ({
+            const nodes = Array.from({ length: 20 }, () => ({
                 x: Math.random() * canvas.width,
                 y: Math.random() * canvas.height,
-                vx: (Math.random() - 0.5) * 1.2,
-                vy: (Math.random() - 0.5) * 1.2,
+                vx: (Math.random() - 0.5) * 1.5,
+                vy: (Math.random() - 0.5) * 1.5,
                 radius: Math.random() * 2 + 1
             }));
 
@@ -450,13 +436,13 @@
 
                     for (let j = i + 1; j < nodes.length; j++) {
                         const target = nodes[j];
-                        const dist = Math.hypot(n.x - target.x, n.y - target.targetY || target.y);
-                        if (dist < 60) {
+                        const dist = Math.hypot(n.x - target.x, n.y - target.y);
+                        if (dist < 65) {
                             ctx.beginPath();
                             ctx.moveTo(n.x, n.y);
                             ctx.lineTo(target.x, target.y);
-                            ctx.strokeStyle = i % 2 === 0 ? 'rgba(255, 0, 51, 0.4)' : 'rgba(255, 255, 255, 0.2)';
-                            ctx.lineWidth = 0.8;
+                            ctx.strokeStyle = i % 2 === 0 ? 'rgba(255, 0, 51, 0.45)' : 'rgba(255, 255, 255, 0.25)';
+                            ctx.lineWidth = 0.9;
                             ctx.stroke();
                         }
                     }
@@ -467,21 +453,151 @@
         }
 
         /* ===================================================================
-           3. CHESS ENGINE & BOARD RENDERER
+           3. DISTINCT HIGH-CONTRAST CHESS PIECE SVG VECTOR MAPS
            =================================================================== */
-        const INITIAL_BOARD = [
-            ['r', 'n', 'b', 'q', 'k', 'b', 'n', 'r'],
-            ['p', 'p', 'p', 'p', 'p', 'p', 'p', 'p'],
-            [null, null, null, null, null, null, null, null],
-            [null, null, null, null, null, null, null, null],
-            [null, null, null, null, null, null, null, null],
-            [null, null, null, null, null, null, null, null],
-            ['P', 'P', 'P', 'P', 'P', 'P', 'P', 'P'],
-            ['R', 'N', 'B', 'Q', 'K', 'B', 'N', 'R']
-        ];
+        const PIECES = {
+            // --- MORTAL WHITE PIECES (Stark White + Black Details) ---
+            'K': `<svg viewBox="0 0 100 100" class="w-full h-full">
+                <!-- Outer Aura Glow -->
+                <path d="M 50 10 L 50 25 M 42 17 L 58 17 M 35 32 Q 50 24 65 32 L 78 45 L 68 55 L 75 80 L 25 80 L 32 55 L 22 45 Z" fill="#ffffff" stroke="#000000" stroke-width="4" stroke-linejoin="round"/>
+                <!-- Cross Top -->
+                <path d="M 50 8 L 50 26 M 40 16 L 60 16" stroke="#000000" stroke-width="6" stroke-linecap="square"/>
+                <path d="M 50 8 L 50 26 M 40 16 L 60 16" stroke="#ff0033" stroke-width="2" stroke-linecap="square"/>
+                <!-- Base Pedestal -->
+                <rect x="20" y="80" width="60" height="10" fill="#ffffff" stroke="#000000" stroke-width="4" rx="2"/>
+                <!-- Crown Detailing -->
+                <path d="M 32 45 Q 50 52 68 45 M 30 65 L 70 65" stroke="#000000" stroke-width="3" fill="none"/>
+            </svg>`,
 
-        let board = JSON.parse(JSON.stringify(INITIAL_BOARD));
-        let currentTurn = 'W'; // W: White Mortal, B: Red Bot
+            'Q': `<svg viewBox="0 0 100 100" class="w-full h-full">
+                <!-- Tiara Spikes -->
+                <path d="M 18 35 L 30 78 L 70 78 L 82 35 L 65 50 L 50 22 L 35 50 Z" fill="#ffffff" stroke="#000000" stroke-width="4" stroke-linejoin="round"/>
+                <!-- Jewels on Spikes -->
+                <circle cx="18" cy="33" r="5" fill="#ff0033" stroke="#000000" stroke-width="2"/>
+                <circle cx="50" cy="18" r="6" fill="#ff0033" stroke="#000000" stroke-width="2"/>
+                <circle cx="82" cy="33" r="5" fill="#ff0033" stroke="#000000" stroke-width="2"/>
+                <!-- Base Pedestal -->
+                <rect x="22" y="80" width="56" height="10" fill="#ffffff" stroke="#000000" stroke-width="4" rx="2"/>
+                <!-- Tiara Accent -->
+                <path d="M 32 62 Q 50 70 68 62" stroke="#000000" stroke-width="3" fill="none"/>
+            </svg>`,
+
+            'R': `<svg viewBox="0 0 100 100" class="w-full h-full">
+                <!-- Fortress Tower Base & Walls -->
+                <path d="M 25 32 L 32 32 L 32 24 L 44 24 L 44 32 L 56 32 L 56 24 L 68 24 L 68 32 L 75 32 L 72 78 L 28 78 Z" fill="#ffffff" stroke="#000000" stroke-width="4" stroke-linejoin="round"/>
+                <!-- Arrow Slits -->
+                <rect x="46" y="42" width="8" height="16" fill="#000000" rx="2"/>
+                <!-- Base Pedestal -->
+                <rect x="22" y="80" width="56" height="10" fill="#ffffff" stroke="#000000" stroke-width="4" rx="2"/>
+            </svg>`,
+
+            'B': `<svg viewBox="0 0 100 100" class="w-full h-full">
+                <!-- Mitre Silhouette -->
+                <path d="M 50 14 C 32 25 28 50 35 78 L 65 78 C 72 50 68 25 50 14 Z" fill="#ffffff" stroke="#000000" stroke-width="4" stroke-linejoin="round"/>
+                <!-- Top Mitre Ball -->
+                <circle cx="50" cy="12" r="5" fill="#ffffff" stroke="#000000" stroke-width="3"/>
+                <!-- Slash/Cut Accent -->
+                <path d="M 44 32 L 58 46 M 50 28 L 50 52 M 40 40 L 60 40" stroke="#000000" stroke-width="3" stroke-linecap="round"/>
+                <!-- Base Pedestal -->
+                <rect x="25" y="80" width="50" height="10" fill="#ffffff" stroke="#000000" stroke-width="4" rx="2"/>
+            </svg>`,
+
+            'N': `<svg viewBox="0 0 100 100" class="w-full h-full">
+                <!-- Aggressive Horse Silhouette -->
+                <path d="M 30 78 L 30 55 C 30 40 40 28 55 18 C 65 24 72 35 68 45 C 62 42 55 42 48 48 C 58 52 65 62 62 78 Z" fill="#ffffff" stroke="#000000" stroke-width="4" stroke-linejoin="round"/>
+                <!-- Mane Spikes -->
+                <path d="M 30 50 L 18 42 L 28 35 L 18 25 L 35 22" stroke="#000000" stroke-width="3" fill="none"/>
+                <!-- Eye -->
+                <circle cx="54" cy="30" r="3" fill="#ff0033"/>
+                <!-- Base Pedestal -->
+                <rect x="22" y="80" width="56" height="10" fill="#ffffff" stroke="#000000" stroke-width="4" rx="2"/>
+            </svg>`,
+
+            'P': `<svg viewBox="0 0 100 100" class="w-full h-full">
+                <!-- Bulb Top -->
+                <circle cx="50" cy="28" r="16" fill="#ffffff" stroke="#000000" stroke-width="4"/>
+                <!-- Body -->
+                <path d="M 38 42 L 32 78 L 68 78 L 62 42 Z" fill="#ffffff" stroke="#000000" stroke-width="4" stroke-linejoin="round"/>
+                <!-- Base Pedestal -->
+                <rect x="26" y="80" width="48" height="10" fill="#ffffff" stroke="#000000" stroke-width="4" rx="2"/>
+            </svg>`,
+
+            // --- MALIGNANT BOT RED/BLACK PIECES (Pitch Black + Crimson Outlines & Glow) ---
+            'k': `<svg viewBox="0 0 100 100" class="w-full h-full">
+                <!-- Dark King Body with Crimson Outline -->
+                <path d="M 50 10 L 50 25 M 42 17 L 58 17 M 35 32 Q 50 24 65 32 L 78 45 L 68 55 L 75 80 L 25 80 L 32 55 L 22 45 Z" fill="#000000" stroke="#ff0033" stroke-width="5" stroke-linejoin="round"/>
+                <!-- Ominous Red Cross -->
+                <path d="M 50 6 L 50 26 M 38 16 L 62 16" stroke="#ff0033" stroke-width="6" stroke-linecap="square"/>
+                <path d="M 50 6 L 50 26 M 38 16 L 62 16" stroke="#ffffff" stroke-width="2" stroke-linecap="square"/>
+                <!-- Glowing Eye Core -->
+                <circle cx="50" cy="48" r="5" fill="#ff0033"/>
+                <!-- Base Pedestal -->
+                <rect x="20" y="80" width="60" height="10" fill="#000000" stroke="#ff0033" stroke-width="4" rx="2"/>
+                <path d="M 30 65 L 70 65" stroke="#ff0033" stroke-width="3" fill="none"/>
+            </svg>`,
+
+            'q': `<svg viewBox="0 0 100 100" class="w-full h-full">
+                <!-- Dark Queen Tiara -->
+                <path d="M 18 35 L 30 78 L 70 78 L 82 35 L 65 50 L 50 22 L 35 50 Z" fill="#000000" stroke="#ff0033" stroke-width="5" stroke-linejoin="round"/>
+                <!-- Red Jewels -->
+                <circle cx="18" cy="33" r="5" fill="#ff0033" stroke="#ffffff" stroke-width="1.5"/>
+                <circle cx="50" cy="18" r="6" fill="#ff0033" stroke="#ffffff" stroke-width="1.5"/>
+                <circle cx="82" cy="33" r="5" fill="#ff0033" stroke="#ffffff" stroke-width="1.5"/>
+                <!-- Base Pedestal -->
+                <rect x="22" y="80" width="56" height="10" fill="#000000" stroke="#ff0033" stroke-width="4" rx="2"/>
+                <!-- Core Glow -->
+                <circle cx="50" cy="55" r="6" fill="#ff0033"/>
+            </svg>`,
+
+            'r': `<svg viewBox="0 0 100 100" class="w-full h-full">
+                <!-- Dark Fortress Tower -->
+                <path d="M 25 32 L 32 32 L 32 24 L 44 24 L 44 32 L 56 32 L 56 24 L 68 24 L 68 32 L 75 32 L 72 78 L 28 78 Z" fill="#000000" stroke="#ff0033" stroke-width="5" stroke-linejoin="round"/>
+                <!-- Glowing Red Slit -->
+                <rect x="46" y="42" width="8" height="18" fill="#ff0033" rx="2"/>
+                <!-- Base Pedestal -->
+                <rect x="22" y="80" width="56" height="10" fill="#000000" stroke="#ff0033" stroke-width="4" rx="2"/>
+            </svg>`,
+
+            'b': `<svg viewBox="0 0 100 100" class="w-full h-full">
+                <!-- Dark Mitre Silhouette -->
+                <path d="M 50 14 C 32 25 28 50 35 78 L 65 78 C 72 50 68 25 50 14 Z" fill="#000000" stroke="#ff0033" stroke-width="5" stroke-linejoin="round"/>
+                <circle cx="50" cy="12" r="5" fill="#ff0033" stroke="#ffffff" stroke-width="1.5"/>
+                <!-- Crimson Cross Cut -->
+                <path d="M 44 32 L 58 46 M 50 28 L 50 52 M 40 40 L 60 40" stroke="#ff0033" stroke-width="4" stroke-linecap="round"/>
+                <!-- Base Pedestal -->
+                <rect x="25" y="80" width="50" height="10" fill="#000000" stroke="#ff0033" stroke-width="4" rx="2"/>
+            </svg>`,
+
+            'n': `<svg viewBox="0 0 100 100" class="w-full h-full">
+                <!-- Dark Beast Silhouette -->
+                <path d="M 30 78 L 30 55 C 30 40 40 28 55 18 C 65 24 72 35 68 45 C 62 42 55 42 48 48 C 58 52 65 62 62 78 Z" fill="#000000" stroke="#ff0033" stroke-width="5" stroke-linejoin="round"/>
+                <!-- Jagged Mane -->
+                <path d="M 30 50 L 18 42 L 28 35 L 18 25 L 35 22" stroke="#ff0033" stroke-width="4" fill="none"/>
+                <!-- Red Fiery Eye -->
+                <circle cx="54" cy="30" r="4" fill="#ff0033"/>
+                <!-- Base Pedestal -->
+                <rect x="22" y="80" width="56" height="10" fill="#000000" stroke="#ff0033" stroke-width="4" rx="2"/>
+            </svg>`,
+
+            'p': `<svg viewBox="0 0 100 100" class="w-full h-full">
+                <!-- Dark Pawn Bulb -->
+                <circle cx="50" cy="28" r="16" fill="#000000" stroke="#ff0033" stroke-width="5"/>
+                <circle cx="50" cy="28" r="4" fill="#ff0033"/>
+                <!-- Body -->
+                <path d="M 38 42 L 32 78 L 68 78 L 62 42 Z" fill="#000000" stroke="#ff0033" stroke-width="5" stroke-linejoin="round"/>
+                <!-- Base Pedestal -->
+                <rect x="26" y="80" width="48" height="10" fill="#000000" stroke="#ff0033" stroke-width="4" rx="2"/>
+            </svg>`
+        };
+
+        /* ===================================================================
+           4. C++ WASM ENGINE BRIDGE + BOARD RENDERING
+           =================================================================== */
+        const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+        let machine = null;
+        let engineFen = START_FEN;
+        let board = [];
+        let currentTurn = 'W';
         let selected = null;
         let validMoves = [];
         let history = [];
@@ -491,148 +607,26 @@
         let isAutoPlay = false;
         let activePersonality = 'executioner';
 
-        // High-contrast SVG pieces (White = Stark White, Black = Blood Red)
-        const PIECES = {
-            'P': `<svg viewBox="0 0 45 45" class="w-full h-full"><path d="M 22.5 9 A 4 4 0 1 1 22.5 17 A 4 4 0 1 1 22.5 9 Z M 21 18 L 24 18 L 25 28 L 20 28 Z M 16 33 L 29 33 L 28 30 L 17 30 Z M 13 38 L 32 38 L 31 35 L 14 35 Z" fill="#ffffff" stroke="#000000" stroke-width="1.5"/></svg>`,
-            'R': `<svg viewBox="0 0 45 45" class="w-full h-full"><path d="M 12 36 L 33 36 L 33 33 L 12 33 Z M 14 33 L 14 23 L 31 23 L 31 33 Z M 12 23 L 33 23 L 34 14 L 30 14 L 30 17 L 26 17 L 26 14 L 19 14 L 19 17 L 15 17 L 15 14 L 11 14 Z" fill="#ffffff" stroke="#000000" stroke-width="1.5"/></svg>`,
-            'N': `<svg viewBox="0 0 45 45" class="w-full h-full"><path d="M 22 10 C 22 10 28 11 30 17 C 32 23 29 28 29 28 L 32 32 L 28 34 L 26 31 C 26 31 21 34 16 31 C 14 28 14 22 18 17 C 20 14 22 10 22 10 Z M 13 38 L 32 38 L 31 35 L 14 35 Z" fill="#ffffff" stroke="#000000" stroke-width="1.5"/></svg>`,
-            'B': `<svg viewBox="0 0 45 45" class="w-full h-full"><path d="M 22.5 8 C 17 14 17 21 20 25 C 20 27 18 29 17 31 L 28 31 C 27 29 25 27 25 25 C 28 21 28 14 22.5 8 Z M 22.5 6 A 2 2 0 1 0 22.5 10 A 2 2 0 1 0 22.5 6 Z M 13 38 L 32 38 L 31 35 L 14 35 Z" fill="#ffffff" stroke="#000000" stroke-width="1.5"/></svg>`,
-            'Q': `<svg viewBox="0 0 45 45" class="w-full h-full"><path d="M 9 22 L 13 32 L 32 32 L 36 22 L 30 26 L 22.5 14 L 15 26 Z M 9 19 A 2 2 0 1 0 9 23 A 2 2 0 1 0 9 19 Z M 36 19 A 2 2 0 1 0 36 23 A 2 2 0 1 0 36 19 Z M 22.5 10 A 2.5 2.5 0 1 0 22.5 15 A 2.5 2.5 0 1 0 22.5 10 Z M 12 37 L 33 37 L 32 34 L 13 34 Z" fill="#ffffff" stroke="#000000" stroke-width="1.5"/></svg>`,
-            'K': `<svg viewBox="0 0 45 45" class="w-full h-full"><path d="M 22.5 6 L 22.5 12 M 19.5 9 L 25.5 9 M 14 24 L 31 24 L 29 32 L 16 32 Z M 15 22 C 12 16 20 12 22.5 15 C 25 12 33 16 30 22 Z M 12 37 L 33 37 L 32 34 L 13 34 Z" fill="#ffffff" stroke="#000000" stroke-width="2"/></svg>`,
-            
-            // Crimson Red Pieces for AI Bot
-            'p': `<svg viewBox="0 0 45 45" class="w-full h-full"><path d="M 22.5 9 A 4 4 0 1 1 22.5 17 A 4 4 0 1 1 22.5 9 Z M 21 18 L 24 18 L 25 28 L 20 28 Z M 16 33 L 29 33 L 28 30 L 17 30 Z M 13 38 L 32 38 L 31 35 L 14 35 Z" fill="#ff0033" stroke="#ffffff" stroke-width="1.5"/></svg>`,
-            'r': `<svg viewBox="0 0 45 45" class="w-full h-full"><path d="M 12 36 L 33 36 L 33 33 L 12 33 Z M 14 33 L 14 23 L 31 23 L 31 33 Z M 12 23 L 33 23 L 34 14 L 30 14 L 30 17 L 26 17 L 26 14 L 19 14 L 19 17 L 15 17 L 15 14 L 11 14 Z" fill="#ff0033" stroke="#ffffff" stroke-width="1.5"/></svg>`,
-            'n': `<svg viewBox="0 0 45 45" class="w-full h-full"><path d="M 22 10 C 22 10 28 11 30 17 C 32 23 29 28 29 28 L 32 32 L 28 34 L 26 31 C 26 31 21 34 16 31 C 14 28 14 22 18 17 C 20 14 22 10 22 10 Z M 13 38 L 32 38 L 31 35 L 14 35 Z" fill="#ff0033" stroke="#ffffff" stroke-width="1.5"/></svg>`,
-            'b': `<svg viewBox="0 0 45 45" class="w-full h-full"><path d="M 22.5 8 C 17 14 17 21 20 25 C 20 27 18 29 17 31 L 28 31 C 27 29 25 27 25 25 C 28 21 28 14 22.5 8 Z M 22.5 6 A 2 2 0 1 0 22.5 10 A 2 2 0 1 0 22.5 6 Z M 13 38 L 32 38 L 31 35 L 14 35 Z" fill="#ff0033" stroke="#ffffff" stroke-width="1.5"/></svg>`,
-            'q': `<svg viewBox="0 0 45 45" class="w-full h-full"><path d="M 9 22 L 13 32 L 32 32 L 36 22 L 30 26 L 22.5 14 L 15 26 Z M 9 19 A 2 2 0 1 0 9 23 A 2 2 0 1 0 9 19 Z M 36 19 A 2 2 0 1 0 36 23 A 2 2 0 1 0 36 19 Z M 22.5 10 A 2.5 2.5 0 1 0 22.5 15 A 2.5 2.5 0 1 0 22.5 10 Z M 12 37 L 33 37 L 32 34 L 13 34 Z" fill="#ff0033" stroke="#ffffff" stroke-width="1.5"/></svg>`,
-            'k': `<svg viewBox="0 0 45 45" class="w-full h-full"><path d="M 22.5 6 L 22.5 12 M 19.5 9 L 25.5 9 M 14 24 L 31 24 L 29 32 L 16 32 Z M 15 22 C 12 16 20 12 22.5 15 C 25 12 33 16 30 22 Z M 12 37 L 33 37 L 32 34 L 13 34 Z" fill="#ff0033" stroke="#ffffff" stroke-width="2"/></svg>`
+        const PERSONALITY_TIMES = {
+            novice: 120,
+            executioner: 600,
+            void: 1200
         };
 
-        function isWhite(p) { return p && p === p.toUpperCase(); }
-        function isBlack(p) { return p && p === p.toLowerCase(); }
+        const PIECE_NAMES = {
+            'K': 'White King', 'Q': 'White Queen', 'R': 'White Rook', 'B': 'White Bishop', 'N': 'White Knight', 'P': 'White Pawn',
+            'k': 'Red Bot King', 'q': 'Red Bot Queen', 'r': 'Red Bot Rook', 'b': 'Red Bot Bishop', 'n': 'Red Bot Knight', 'p': 'Red Bot Pawn'
+        };
 
-        function renderBoard() {
-            const boardEl = document.getElementById('chessboard');
-            boardEl.innerHTML = '';
-
-            for (let r = 0; r < 8; r++) {
-                for (let c = 0; c < 8; c++) {
-                    const actualR = isFlipped ? 7 - r : r;
-                    const actualC = isFlipped ? 7 - c : c;
-
-                    const isDarkTile = (actualR + actualC) % 2 === 1;
-                    const piece = board[actualR][actualC];
-
-                    const tile = document.createElement('div');
-                    tile.className = `relative flex items-center justify-center ${isDarkTile ? 'tile-dark' : 'tile-light'} cursor-pointer`;
-                    
-                    if (selected && selected.r === actualR && selected.c === actualC) {
-                        tile.classList.add('tile-selected');
-                    }
-
-                    const isPossible = validMoves.some(m => m.r === actualR && m.c === actualC);
-                    if (isPossible) {
-                        if (piece) tile.classList.add('tile-possible-capture');
-                        else tile.classList.add('tile-possible-move');
-                    }
-
-                    // Render Piece SVG
-                    if (piece) {
-                        const pEl = document.createElement('div');
-                        pEl.className = 'w-4/5 h-4/5 chess-piece flex items-center justify-center';
-                        pEl.innerHTML = PIECES[piece] || '';
-                        tile.appendChild(pEl);
-                    }
-
-                    tile.onclick = () => onTileClick(actualR, actualC);
-                    boardEl.appendChild(tile);
-                }
-            }
-        }
-
-        function getMoves(r, c) {
-            const piece = board[r][c];
-            if (!piece) return [];
-            const moves = [];
-            const white = isWhite(piece);
-
-            // Pawns
-            if (piece.toUpperCase() === 'P') {
-                const dir = white ? -1 : 1;
-                if (r + dir >= 0 && r + dir < 8 && !board[r + dir][c]) {
-                    moves.push({ r: r + dir, c });
-                    if ((white && r === 6) || (!white && r === 1)) {
-                        if (!board[r + 2 * dir][c]) moves.push({ r: r + 2 * dir, c });
-                    }
-                }
-                for (let dc of [-1, 1]) {
-                    if (c + dc >= 0 && c + dc < 8 && r + dir >= 0 && r + dir < 8) {
-                        const t = board[r + dir][c + dc];
-                        if (t && (white ? isBlack(t) : isWhite(t))) moves.push({ r: r + dir, c: c + dc });
-                    }
-                }
-            }
-
-            // Knights
-            if (piece.toUpperCase() === 'N') {
-                [[-2,-1],[-2,1],[-1,-2],[-1,2],[1,-2],[1,2],[2,-1],[2,1]].forEach(([dr, dc]) => {
-                    const nr = r + dr, nc = c + dc;
-                    if (nr >= 0 && nr < 8 && nc >= 0 && nc < 8) {
-                        const t = board[nr][nc];
-                        if (!t || (white ? isBlack(t) : isWhite(t))) moves.push({ r: nr, c: nc });
-                    }
-                });
-            }
-
-            // Sliding Pieces (Rook, Bishop, Queen)
-            if (['R', 'B', 'Q'].includes(piece.toUpperCase())) {
-                const dirs = [];
-                if (['R', 'Q'].includes(piece.toUpperCase())) dirs.push([-1,0],[1,0],[0,-1],[0,1]);
-                if (['B', 'Q'].includes(piece.toUpperCase())) dirs.push([-1,-1],[-1,1],[1,-1],[1,1]);
-
-                dirs.forEach(([dr, dc]) => {
-                    let nr = r + dr, nc = c + dc;
-                    while (nr >= 0 && nr < 8 && nc >= 0 && nc < 8) {
-                        const t = board[nr][nc];
-                        if (!t) moves.push({ r: nr, c: nc });
-                        else {
-                            if (white ? isBlack(t) : isWhite(t)) moves.push({ r: nr, c: nc });
-                            break;
-                        }
-                        nr += dr; nc += dc;
-                    }
-                });
-            }
-
-            // King
-            if (piece.toUpperCase() === 'K') {
-                for (let dr = -1; dr <= 1; dr++) {
-                    for (let dc = -1; dc <= 1; dc++) {
-                        if (dr === 0 && dc === 0) continue;
-                        const nr = r + dr, nc = c + dc;
-                        if (nr >= 0 && nr < 8 && nc >= 0 && nc < 8) {
-                            const t = board[nr][nc];
-                            if (!t || (white ? isBlack(t) : isWhite(t))) moves.push({ r: nr, c: nc });
-                        }
-                    }
-                }
-            }
-
-            return moves;
-        }
-
-        // The C++ engine is the single source of truth for the chess position.
-        // The browser only renders that position and sends moves to the engine.
-        const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
-        let engineFen = START_FEN;
+        function isWhite(p) { return !!p && p === p.toUpperCase(); }
+        function isBlack(p) { return !!p && p === p.toLowerCase(); }
 
         function fenToBoard(fen) {
             const placement = fen.split(' ')[0];
             return placement.split('/').map(row => {
                 const out = [];
                 for (const ch of row) {
-                    if (/\\d/.test(ch)) {
+                    if (/\d/.test(ch)) {
                         for (let i = 0; i < Number(ch); i++) out.push(null);
                     } else out.push(ch);
                 }
@@ -654,13 +648,18 @@
         }
 
         function engineCall(name, returnType, argTypes, args) {
-            if (!machine) return '';
-            return machine.ccall(name, returnType, argTypes, args) || '';
+            if (!machine || typeof machine.ccall !== 'function') return '';
+            try {
+                return machine.ccall(name, returnType, argTypes, args) || '';
+            } catch (e) {
+                addLog('[WASM ERROR]: ' + name + ' failed.', 'red');
+                return '';
+            }
         }
 
         function getEngineLegalMoves() {
             const text = engineCall('engine_legal_moves', 'string', ['string'], [engineFen]);
-            return text ? text.trim().split(/\\s+/) : [];
+            return text ? text.trim().split(/\s+/).filter(Boolean) : [];
         }
 
         function syncBoardFromEngine() {
@@ -676,6 +675,43 @@
             updateUI();
         }
 
+        function renderBoard() {
+            const boardEl = document.getElementById('chessboard');
+            boardEl.innerHTML = '';
+
+            for (let r = 0; r < 8; r++) {
+                for (let c = 0; c < 8; c++) {
+                    const actualR = isFlipped ? 7 - r : r;
+                    const actualC = isFlipped ? 7 - c : c;
+                    const isDarkTile = (actualR + actualC) % 2 === 1;
+                    const piece = board[actualR]?.[actualC];
+                    const tile = document.createElement('div');
+
+                    tile.className = `relative flex items-center justify-center ${isDarkTile ? 'tile-dark' : 'tile-light'} cursor-pointer transition-all duration-150`;
+
+                    if (selected && selected.r === actualR && selected.c === actualC) tile.classList.add('tile-selected');
+
+                    const isPossible = validMoves.some(m => m.r === actualR && m.c === actualC);
+                    if (isPossible) {
+                        if (piece) tile.classList.add('tile-possible-capture');
+                        else tile.classList.add('tile-possible-move');
+                    }
+
+                    if (piece) {
+                        const pEl = document.createElement('div');
+                        const isW = isWhite(piece);
+                        pEl.className = `w-4/5 h-4/5 chess-piece flex items-center justify-center ${isW ? 'piece-white-glow' : 'piece-black-glow'}`;
+                        pEl.innerHTML = PIECES[piece] || '';
+                        pEl.title = `${PIECE_NAMES[piece] || 'Piece'} (${coordsToSquare(actualR, actualC)})`;
+                        tile.appendChild(pEl);
+                    }
+
+                    tile.onclick = () => onTileClick(actualR, actualC);
+                    boardEl.appendChild(tile);
+                }
+            }
+        }
+
         function onTileClick(r, c) {
             if (!machine) {
                 addLog('[BRAIN OFFLINE]: C++ engine is not ready.', 'red');
@@ -686,23 +722,20 @@
             const legal = getEngineLegalMoves();
 
             if (selected) {
-                const matching = legal.filter(m => m.slice(2, 4) === square &&
-                    m.slice(0, 2) === coordsToSquare(selected.r, selected.c));
+                const from = coordsToSquare(selected.r, selected.c);
+                const matching = legal.filter(m => m.slice(0, 2) === from && m.slice(2, 4) === square);
                 if (matching.length) {
-                    // Automatically choose queen promotion when several promotion
-                    // moves exist. The engine remains authoritative about legality.
                     const move = matching.find(m => m.length === 5 && m[4] === 'q') || matching[0];
                     applyEngineMove(move, 'human');
                     return;
                 }
             }
 
-            const piece = board[r][c];
-            if (piece && ((currentTurn === 'W' && isWhite(piece)) || (currentTurn === 'B' && isBlack(piece)))) {
+            const piece = board[r]?.[c];
+            const ownPiece = piece && ((currentTurn === 'W' && isWhite(piece)) || (currentTurn === 'B' && isBlack(piece)));
+            if (ownPiece) {
                 selected = { r, c };
-                validMoves = legal
-                    .filter(m => m.slice(0, 2) === square)
-                    .map(m => squareToCoords(m.slice(2, 4)));
+                validMoves = legal.filter(m => m.slice(0, 2) === square).map(m => squareToCoords(m.slice(2, 4)));
             } else {
                 selected = null;
                 validMoves = [];
@@ -716,10 +749,10 @@
             const to = squareToCoords(uci.slice(2, 4));
             const piece = board[from.r]?.[from.c];
             const target = board[to.r]?.[to.c];
-
             const nextFen = engineCall('engine_apply_move', 'string', ['string', 'string'], [before, uci]);
+
             if (!nextFen) {
-                addLog('[ENGINE ERROR]: Illegal move rejected by C++.', 'red');
+                addLog('[ENGINE ERROR]: C++ rejected move ' + uci + '.', 'red');
                 refreshEngineState();
                 return false;
             }
@@ -728,11 +761,9 @@
                 if (isWhite(target)) capturedBlack.push(target);
                 else capturedWhite.push(target);
                 playSound('capture');
-            } else {
-                playSound('move');
-            }
+            } else playSound('move');
 
-            const files = ['a','b','c','d','e','f','g','h'];
+            const files = 'abcdefgh';
             let moveLabel = piece ? piece.toUpperCase() : '';
             moveLabel += files[from.c] + (8 - from.r) + '→' + files[to.c] + (8 - to.r);
             if (uci.length === 5) moveLabel += '=' + uci[4].toUpperCase();
@@ -746,117 +777,82 @@
             renderBoard();
 
             const status = engineCall('engine_status', 'string', ['string'], [engineFen]);
-            if (status === 'check') addLog('[ENGINE]: Check.', 'red');
-            if (status === 'checkmate') addLog('[ENGINE]: Checkmate.', 'red');
-            if (status === 'stalemate') addLog('[ENGINE]: Stalemate.', 'red');
-            if (status === 'draw-50' || status === 'draw-material') addLog('[ENGINE]: ' + status + '.', 'red');
+            if (status === 'check') addLog('[ENGINE]: Check detected.', 'red');
+            else if (status === 'checkmate') addLog('[ENGINE]: CHECKMATE. Mortal cognition terminated.', 'red');
+            else if (status === 'stalemate') addLog('[ENGINE]: Stalemate. No legal trajectory remains.', 'red');
+            else if (status === 'draw-50' || status === 'draw-material') addLog('[ENGINE]: ' + status + '.', 'red');
 
-            if (status === 'checkmate' || status === 'stalemate' || status === 'draw-50' || status === 'draw-material') return true;
+            if (['checkmate', 'stalemate', 'draw-50', 'draw-material'].includes(status)) return true;
 
-            if (source === 'human' && currentTurn === 'B' && !isAutoPlay) {
-                setTimeout(botTurn, 600);
-            } else if (isAutoPlay) {
-                setTimeout(botTurn, 500);
+            if (source === 'human' && currentTurn === 'B') {
+                setTimeout(botTurn, isAutoPlay ? 200 : 650);
+            } else if (source === 'engine' && isAutoPlay && currentTurn === 'B') {
+                setTimeout(botTurn, 350);
             }
             return true;
         }
 
-        function boardToFen() {
-            // Kept for compatibility/debugging. The engineFen is authoritative.
-            return engineFen;
-        }
+        function boardToFen() { return engineFen; }
 
-        let machine = null;
         async function initMachine() {
             if (typeof createEngine !== 'function') {
-                addLog('[BRAIN OFFLINE]: engine.js is not loaded.', 'red');
+                addLog('[BRAIN OFFLINE]: engine.js / createEngine is unavailable.', 'red');
                 return;
             }
-            machine = await createEngine();
-            engineFen = START_FEN;
-            syncBoardFromEngine();
-            renderBoard();
-            updateUI();
-            addLog('[BRAIN ONLINE]: C++ WASM engine connected and synchronized.', 'red');
+            try {
+                machine = await createEngine();
+                engineFen = START_FEN;
+                syncBoardFromEngine();
+                renderBoard();
+                updateUI();
+                addLog('[BRAIN ONLINE]: C++ WASM engine connected and synchronized.', 'red');
+            } catch (e) {
+                machine = null;
+                addLog('[BRAIN FAILURE]: Could not initialize C++ WASM engine.', 'red');
+            }
         }
 
         function botTurn() {
-            if (!machine) {
-                addLog('[BRAIN OFFLINE]: Waiting for C++ engine.', 'red');
-                return;
-            }
-            if (currentTurn !== 'B') return;
+            if (!machine || currentTurn !== 'B') return;
 
             const status = engineCall('engine_status', 'string', ['string'], [engineFen]);
-            if (status !== 'ongoing' && status !== 'check') {
+            if (!['ongoing', 'check'].includes(status)) {
                 addLog('[ENGINE]: Position is terminal (' + status + ').', 'red');
                 return;
             }
 
-            const ms = activePersonality === 'novice' ? 100 : activePersonality === 'aggressive' ? 500 : 1000;
+            const ms = PERSONALITY_TIMES[activePersonality] || PERSONALITY_TIMES.executioner;
+            addLog('[NEURAL EXECUTION]: Searching at ' + ms + ' ms...', 'red');
             const uci = engineCall('engine_best_move', 'string', ['string', 'number'], [engineFen, ms]);
+
             if (!uci) {
-                addLog('[ENGINE]: No legal move. Position is terminal.', 'red');
+                addLog('[ENGINE]: No legal move returned.', 'red');
+                refreshEngineState();
                 return;
             }
 
-            addLog('[NEURAL EXECUTION]: C++ engine selected ' + uci + '.', 'red');
+            addLog('[NEURAL EXECUTION]: C++ selected ' + uci + '.', 'red');
             applyEngineMove(uci, 'engine');
         }
 
-        /* ===================================================================
-           4. LOGGING & DYNAMIC METRIC UPDATES
-           =================================================================== */
-        function addLog(msg, color = 'white') {
-            const logBox = document.getElementById('thoughtLog');
-            const entry = document.createElement('div');
-            const time = new Date().toTimeString().split(' ')[0];
-
-            entry.className = color === 'red' ? 'text-red-500 font-bold border-l-2 border-red-600 pl-2' : 'text-gray-300 border-l-2 border-white pl-2';
-            entry.innerHTML = `<span class="text-gray-600">[${time}]</span> ${msg}`;
-            logBox.appendChild(entry);
-            logBox.scrollTop = logBox.scrollHeight;
-        }
-
-        function updateUI() {
-            // Update Move Chronicle
-            const table = document.getElementById('moveHistoryTable');
-            table.innerHTML = '';
-            for (let i = 0; i < history.length; i += 2) {
-                const w = history[i];
-                const b = history[i + 1];
-                const row = document.createElement('tr');
-                row.innerHTML = `
-                    <td class="py-1 text-gray-600">${Math.floor(i/2)+1}.</td>
-                    <td class="py-1 text-white">${w ? w.move : '-'}</td>
-                    <td class="py-1 text-red-500">${b ? b.move : '-'}</td>
-                `;
-                table.appendChild(row);
-            }
-            document.getElementById('moveCounter').innerText = `${history.length} MOVES`;
-
-            // Material Balance
-            document.getElementById('capturedWhiteContainer').innerText = capturedWhite.join(' ');
-            document.getElementById('capturedBlackContainer').innerText = capturedBlack.join(' ');
-
-            // Sanity Meter Calculation
-            const diff = capturedWhite.length - capturedBlack.length;
-            const whitePct = Math.max(10, Math.min(90, 50 - (diff * 5)));
-            document.getElementById('sanityBarWhite').style.width = `${whitePct}%`;
-            document.getElementById('sanityBarBlack').style.width = `${100 - whitePct}%`;
-        }
-
         function setPersonality(mode) {
-            activePersonality = mode;
+            activePersonality = PERSONALITY_TIMES[mode] ? mode : 'executioner';
+            document.querySelectorAll('.personality-btn').forEach(btn => {
+                const active = btn.dataset.mode === activePersonality;
+                btn.classList.toggle('ring-1', active);
+                btn.classList.toggle('ring-red-600', active);
+                btn.classList.toggle('bg-red-600/10', active);
+            });
             playSound('mutate');
-            addLog(`[PERSONALITY RECONFIGURED]: Switched to ${mode.toUpperCase()}`, 'red');
+            addLog('[PERSONALITY RECONFIGURED]: ' + activePersonality.toUpperCase() + ' search profile active.', 'red');
         }
 
         function forceMutation() {
             playSound('mutate');
             document.getElementById('valAggression').innerText = `${Math.floor(Math.random()*30 + 70)}%`;
             document.getElementById('valCruelty').innerText = `${Math.floor(Math.random()*20 + 80)}%`;
-            addLog('[MUTATION SWEEP]: Recalibrating node synapses manually.', 'red');
+            document.getElementById('valMastery').innerText = `${Math.floor(Math.random()*30 + 60)}%`;
+            addLog('[MUTATION SWEEP]: UI personality metrics recalibrated. Engine rules remain authoritative.', 'red');
         }
 
         function flipBoard() {
@@ -866,13 +862,14 @@
 
         function toggleAutoPlay() {
             isAutoPlay = !isAutoPlay;
+            const btn = document.getElementById('autoPlayBtn');
+            btn.innerHTML = isAutoPlay ? '<i class="fa-solid fa-pause"></i> PAUSE BOT' : '<i class="fa-solid fa-robot"></i> AUTO BOT';
             if (isAutoPlay && currentTurn === 'B') botTurn();
         }
 
         function resetGame() {
             engineFen = START_FEN;
-            board = fenToBoard(engineFen);
-            currentTurn = 'W';
+            syncBoardFromEngine();
             selected = null;
             validMoves = [];
             history = [];
@@ -881,15 +878,16 @@
             renderBoard();
             updateUI();
             addLog('[SYSTEM PURGE]: C++ engine position restored to origin.', 'white');
+            if (isAutoPlay) setTimeout(botTurn, 300);
         }
 
-        // Initialize Application
-        window.onload = async function() {
+        window.addEventListener('load', async () => {
             initSynapseCanvas();
+            board = fenToBoard(START_FEN);
             renderBoard();
             updateUI();
             await initMachine();
-        };
+        });
     </script>
 </body>
 </html>
