@@ -62,6 +62,33 @@ EXPORT const char* engine_best_move(const char* fen, int movetime_ms) {
     return g_out.c_str();
 }
 
+// Search from a starting FEN after the supplied UCI move history.
+// This lets the searcher detect threefold repetition along the actual game path.
+EXPORT const char* engine_best_move_moves(const char* fen, const char* moves, int movetime_ms) {
+    Position pos;
+    pos.setFEN(fen);
+    vector<uint64_t> history;
+    istringstream ss(moves ? moves : "");
+    string tok;
+    while (ss >> tok) {
+        Move m;
+        if (!parseMove(pos, tok, m)) break;
+        history.push_back(pos.key);
+        pos.make(m);
+    }
+    g_stop = false;
+    Searcher s;
+    Move m = s.run(pos, movetime_ms, MAXPLY, false, &history);
+    g_out = s.hasMove ? moveToStr(m) : "";
+    return g_out.c_str();
+}
+
+// Reset the shared transposition table when a new game begins.
+EXPORT void engine_new_game() {
+    if (g_tt.empty()) ttResize(16);
+    ttClear();
+}
+
 // One of: ongoing, check, checkmate, stalemate, draw-50, draw-material.
 // "checkmate" means the side to move has been mated.
 EXPORT const char* engine_status(const char* fen) {
