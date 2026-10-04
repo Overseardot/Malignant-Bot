@@ -22,6 +22,11 @@
 
 static string g_out;
 
+// Keep the relatively large search state off the WebAssembly call stack.
+// The browser bridge is currently single-threaded, so one persistent searcher
+// is sufficient and avoids repeated stack allocation for every engine call.
+static Searcher g_searcher;
+
 // Legal moves as space-separated UCI text, e.g. "e2e4 g1f3 ...".
 EXPORT const char* engine_legal_moves(const char* fen) {
     Position pos;
@@ -56,9 +61,8 @@ EXPORT const char* engine_best_move(const char* fen, int movetime_ms) {
     Position pos;
     pos.setFEN(fen);
     g_stop = false;
-    Searcher s;
-    Move m = s.run(pos, movetime_ms, MAXPLY, false);
-    g_out = s.hasMove ? moveToStr(m) : "";
+    Move m = g_searcher.run(pos, movetime_ms, MAXPLY, false);
+    g_out = g_searcher.hasMove ? moveToStr(m) : "";
     return g_out.c_str();
 }
 
@@ -77,9 +81,8 @@ EXPORT const char* engine_best_move_moves(const char* fen, const char* moves, in
         pos.make(m);
     }
     g_stop = false;
-    Searcher s;
-    Move m = s.run(pos, movetime_ms, MAXPLY, false, &history);
-    g_out = s.hasMove ? moveToStr(m) : "";
+    Move m = g_searcher.run(pos, movetime_ms, MAXPLY, false, &history);
+    g_out = g_searcher.hasMove ? moveToStr(m) : "";
     return g_out.c_str();
 }
 
