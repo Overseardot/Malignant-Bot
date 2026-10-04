@@ -349,7 +349,7 @@
 
     </main>
 
-    <script src="engine.js"></script>
+    <script src="engine.js?v=malignant-20261004"></script>
 
     <script>
         /* ===================================================================
@@ -718,10 +718,35 @@
 
                     tile.dataset.square = coordsToSquare(actualR, actualC);
                     tile.setAttribute('role', 'button');
-                    tile.onclick = (event) => { event.preventDefault(); onTileClick(actualR, actualC); };
+                    tile.setAttribute('tabindex', '0');
                     boardEl.appendChild(tile);
                 }
             }
+        }
+
+        function installBoardInput() {
+            const boardEl = document.getElementById('chessboard');
+            if (!boardEl || boardEl.dataset.inputReady === '1') return;
+            boardEl.dataset.inputReady = '1';
+
+            const activate = (event) => {
+                const tile = event.target.closest('[data-square]');
+                if (!tile || !boardEl.contains(tile)) return;
+                event.preventDefault();
+                const coords = squareToCoords(tile.dataset.square);
+                onTileClick(coords.r, coords.c);
+            };
+
+            boardEl.addEventListener('click', activate);
+            boardEl.addEventListener('touchend', activate, { passive: false });
+            boardEl.addEventListener('keydown', (event) => {
+                if (event.key !== 'Enter' && event.key !== ' ') return;
+                const tile = event.target.closest('[data-square]');
+                if (!tile) return;
+                event.preventDefault();
+                const coords = squareToCoords(tile.dataset.square);
+                onTileClick(coords.r, coords.c);
+            });
         }
 
         function onTileClick(r, c) {
@@ -815,11 +840,36 @@
             try {
                 machine = await createEngine();
                 if (!machine || typeof machine.ccall !== 'function') throw new Error('WASM module initialized without ccall');
+
                 engineFen = START_FEN;
                 syncBoardFromEngine();
+                installBoardInput();
+
+                const bootMoves = machine.ccall(
+                    'engine_legal_moves',
+                    'string',
+                    ['string'],
+                    [START_FEN]
+                ).trim();
+
+                if (!bootMoves || !bootMoves.includes('e2e4')) {
+                    throw new Error('WASM legal-move self-test failed');
+                }
+
+                const bootFen = machine.ccall(
+                    'engine_apply_move',
+                    'string',
+                    ['string', 'string'],
+                    [START_FEN, 'e2e4']
+                );
+
+                if (!bootFen || !bootFen.includes(' b ')) {
+                    throw new Error('WASM move-application self-test failed');
+                }
+
                 renderBoard();
                 updateUI();
-                addLog('[BRAIN ONLINE]: C++ WASM engine connected and synchronized.', 'red');
+                addLog('[BRAIN ONLINE]: C++ WASM engine connected. Self-test PASSED.', 'red');
             } catch (e) {
                 machine = null;
                 addLog('[BRAIN FAILURE]: Could not initialize C++ WASM engine: ' + (e?.message || e), 'red');
@@ -905,6 +955,7 @@
             board = fenToBoard(START_FEN);
             renderBoard();
             updateUI();
+            installBoardInput();
             await initMachine();
         });
     </script>
