@@ -770,6 +770,7 @@
             moveLabel += files[from.c] + (8 - from.r) + '→' + files[to.c] + (8 - to.r);
             if (uci.length === 5) moveLabel += '=' + uci[4].toUpperCase();
             history.push({ player: currentTurn, move: moveLabel });
+            moveHistoryUci.push(uci);
 
             engineFen = nextFen;
             syncBoardFromEngine();
@@ -825,7 +826,10 @@
 
             const ms = PERSONALITY_TIMES[activePersonality] || PERSONALITY_TIMES.executioner;
             addLog('[NEURAL EXECUTION]: Searching at ' + ms + ' ms...', 'red');
-            const uci = engineCall('engine_best_move', 'string', ['string', 'number'], [engineFen, ms]);
+            const playedMoves = moveHistoryUci.join(' ');
+            const uci = playedMoves
+                ? engineCall('engine_best_move_moves', 'string', ['string', 'string', 'number'], [START_FEN, playedMoves, ms])
+                : engineCall('engine_best_move', 'string', ['string', 'number'], [engineFen, ms]);
 
             if (!uci) {
                 addLog('[ENGINE]: No legal move returned.', 'red');
