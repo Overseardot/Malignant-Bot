@@ -719,10 +719,11 @@
                     const actualC = isFlipped ? 7 - c : c;
                     const isDarkTile = (actualR + actualC) % 2 === 1;
                     const piece = board[actualR]?.[actualC];
-                    const tile = document.createElement('div');
-
-                    tile.className = `relative flex items-center justify-center ${isDarkTile ? 'tile-dark' : 'tile-light'} cursor-pointer transition-all duration-150`;
+                    const tile = document.createElement('button');
+                    tile.type = 'button';
+                    tile.className = `relative flex items-center justify-center ${isDarkTile ? 'tile-dark' : 'tile-light'} cursor-pointer transition-all duration-150 p-0 m-0 border-0`;
                     tile.style.pointerEvents = 'auto';
+                    tile.style.touchAction = 'none';
 
                     if (selected && selected.r === actualR && selected.c === actualC) tile.classList.add('tile-selected');
 
@@ -738,34 +739,14 @@
                         pEl.className = `w-4/5 h-4/5 chess-piece flex items-center justify-center ${isW ? 'piece-white-glow' : 'piece-black-glow'}`;
                         pEl.innerHTML = PIECES[piece] || '';
                         pEl.title = `${PIECE_NAMES[piece] || 'Piece'} (${coordsToSquare(actualR, actualC)})`;
+                        pEl.style.pointerEvents = 'none';
                         tile.appendChild(pEl);
                     }
 
                     const square = coordsToSquare(actualR, actualC);
                     tile.dataset.square = square;
-                    tile.setAttribute('role', 'button');
-                    tile.setAttribute('tabindex', '0');
-
-                    // Bind directly to every square. This avoids relying on event
-                    // bubbling/target traversal through the custom SVG pieces.
-                    tile.addEventListener('pointerdown', (event) => {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        const coords = squareToCoords(square);
-                        onTileClick(coords.r, coords.c);
-                    }, { passive: false });
-
+                    tile.setAttribute('aria-label', `Chess square ${square}`);
                     tile.addEventListener('click', (event) => {
-                        // Keyboard activation has no preceding pointerdown.
-                        if (event.detail === 0) {
-                            event.preventDefault();
-                            const coords = squareToCoords(square);
-                            onTileClick(coords.r, coords.c);
-                        }
-                    });
-
-                    tile.addEventListener('keydown', (event) => {
-                        if (event.key !== 'Enter' && event.key !== ' ') return;
                         event.preventDefault();
                         event.stopPropagation();
                         const coords = squareToCoords(square);
