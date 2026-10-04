@@ -131,6 +131,9 @@
             grid-template-rows:repeat(8,minmax(0,1fr));
             width:100%;
             height:100%;
+            position:relative;
+            z-index:60;
+            pointer-events:auto !important;
             touch-action:none;
             user-select:none;
         }
@@ -719,6 +722,7 @@
                     const tile = document.createElement('div');
 
                     tile.className = `relative flex items-center justify-center ${isDarkTile ? 'tile-dark' : 'tile-light'} cursor-pointer transition-all duration-150`;
+                    tile.style.pointerEvents = 'auto';
 
                     if (selected && selected.r === actualR && selected.c === actualC) tile.classList.add('tile-selected');
 
@@ -737,46 +741,47 @@
                         tile.appendChild(pEl);
                     }
 
-                    tile.dataset.square = coordsToSquare(actualR, actualC);
+                    const square = coordsToSquare(actualR, actualC);
+                    tile.dataset.square = square;
                     tile.setAttribute('role', 'button');
                     tile.setAttribute('tabindex', '0');
+
+                    // Bind directly to every square. This avoids relying on event
+                    // bubbling/target traversal through the custom SVG pieces.
+                    tile.addEventListener('pointerdown', (event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        const coords = squareToCoords(square);
+                        onTileClick(coords.r, coords.c);
+                    }, { passive: false });
+
+                    tile.addEventListener('click', (event) => {
+                        // Keyboard activation has no preceding pointerdown.
+                        if (event.detail === 0) {
+                            event.preventDefault();
+                            const coords = squareToCoords(square);
+                            onTileClick(coords.r, coords.c);
+                        }
+                    });
+
+                    tile.addEventListener('keydown', (event) => {
+                        if (event.key !== 'Enter' && event.key !== ' ') return;
+                        event.preventDefault();
+                        event.stopPropagation();
+                        const coords = squareToCoords(square);
+                        onTileClick(coords.r, coords.c);
+                    });
+
                     boardEl.appendChild(tile);
                 }
             }
         }
 
         function installBoardInput() {
-            const boardEl = document.getElementById('chessboard');
-            if (!boardEl || boardEl.dataset.inputReady === '1') return;
-            boardEl.dataset.inputReady = '1';
-
-            boardEl.addEventListener('pointerdown', (event) => {
-                const target = event.target;
-                const tile = target && typeof target.closest === 'function'
-                    ? target.closest('[data-square]')
-                    : null;
-                if (!tile || !boardEl.contains(tile)) return;
-
-                event.preventDefault();
-                event.stopPropagation();
-
-                const square = tile.dataset.square;
-                if (!square || square.length !== 2) return;
-
-                const coords = squareToCoords(square);
-                onTileClick(coords.r, coords.c);
-            }, { passive: false });
-
-            boardEl.addEventListener('keydown', (event) => {
-                if (event.key !== 'Enter' && event.key !== ' ') return;
-                const tile = event.target.closest('[data-square]');
-                if (!tile || !boardEl.contains(tile)) return;
-                event.preventDefault();
-                const coords = squareToCoords(tile.dataset.square);
-                onTileClick(coords.r, coords.c);
-            });
+            // Square listeners are installed directly by renderBoard().
+            // Kept as a compatibility hook for initialization/reset flows.
+            return true;
         }
-
         function onTileClick(r, c) {
             if (!machine || typeof machine.ccall !== 'function') {
                 addLog('[BRAIN OFFLINE]: C++ engine is not ready.', 'red');
